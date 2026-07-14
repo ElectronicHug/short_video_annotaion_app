@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 import json
 import shutil
 from pathlib import Path
@@ -70,6 +70,9 @@ class HfDatasetStore:
 
     def download_video(self, video: dict[str, Any]) -> Path:
         return self._download(str(video["video_path"]))
+
+    def download_video_async(self, video: dict[str, Any]) -> Future[Path]:
+        return _PREFETCH_EXECUTOR.submit(self.download_video, video)
 
     def is_video_cached(self, video: dict[str, Any]) -> bool:
         cached = try_to_load_from_cache(

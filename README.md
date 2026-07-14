@@ -18,6 +18,21 @@ annotation_app/dedup_app.py
 annotation_app/text_label_app.py
 ```
 
+Funnel categories:
+
+```text
+matched
+title_matched
+partially_matched
+unmatched
+annotation_problem
+ignore
+```
+
+In HF mode, video download is capped at 20 seconds. A timeout or download
+error is automatically saved as `annotation_problem` in Firestore, so the app
+can move on instead of hanging.
+
 ## Local Setup
 
 Base environment: `vlm-env` with Python `3.13.14`.

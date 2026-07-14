@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+from concurrent.futures import TimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,32 +31,38 @@ BUCKETS_DIR = DATASET_DIR / "buckets"
 MAX_DURATION_SECONDS = 60
 HISTORY_LIMIT = 2
 HF_PREFETCH_AHEAD = 2
+HF_DOWNLOAD_TIMEOUT_SECONDS = 20
 
 CATEGORIES = [
     {
         "id": "matched",
         "label": "Matched",
-        "help": "Audio and visible subtitles match.",
+        "help": "Speech matches visible subtitles/text.",
     },
     {
         "id": "title_matched",
-        "label": "Title + Matched",
-        "help": "Title/static text exists, and spoken subtitles match.",
+        "label": "Title matched",
+        "help": "Title/static text matches; subtitles may be absent.",
     },
     {
         "id": "partially_matched",
-        "label": "Partly Matched",
-        "help": "Some subtitle lines match, but not all.",
+        "label": "Partly matched",
+        "help": "Only part of the visible text matches.",
     },
     {
         "id": "unmatched",
         "label": "Unmatched",
-        "help": "Audio does not match visible subtitles.",
+        "help": "Visible text does not match the speech/title.",
+    },
+    {
+        "id": "annotation_problem",
+        "label": "Annotation problem",
+        "help": "Technical/load issue or impossible to annotate reliably.",
     },
     {
         "id": "ignore",
         "label": "Ignore",
-        "help": "Bad sample, unclear text/audio, duplicate style, or not useful.",
+        "help": "Not useful for the dataset.",
     },
 ]
 CATEGORY_BY_ID = {category["id"]: category for category in CATEGORIES}
@@ -429,10 +436,11 @@ def classify_hf_video(
     video: dict[str, Any],
     category_id: str,
     videos_by_id: dict[str, dict[str, Any]],
+    extra_fields: dict[str, Any] | None = None,
 ) -> None:
     video_id = video["video_id"]
     previous_decision = state.get("decisions", {}).get(video_id)
-    state.setdefault("decisions", {})[video_id] = {
+    decision = {
         "category": category_id,
         "video_path": video["video_path"],
         "info_path": video.get("info_path"),
@@ -442,6 +450,9 @@ def classify_hf_video(
         "webpage_url": video.get("webpage_url", ""),
         "classified_at": now_iso(),
     }
+    if extra_fields:
+        decision.update(extra_fields)
+    state.setdefault("decisions", {})[video_id] = decision
     history = state.setdefault("recent_history", [])
     history.append({"video_id": video_id, "previous_decision": previous_decision})
     state["recent_history"] = history[-HISTORY_LIMIT:]
@@ -452,7 +463,7 @@ def classify_hf_video(
         decision_store.upsert_funnel_decision(
             dataset_id=state.get("dataset_id") or DATASET_ID,
             video_id=video_id,
-            decision=state["decisions"][video_id],
+            decision=decision,
             annotator_id=get_config_value("ANNOTATOR_ID", "default"),
         )
     else:
@@ -626,10 +637,13 @@ def main() -> None:
             st.rerun()
         if st.button("Export indexes", use_container_width=True):
             if hf_store is not None:
-                write_hf_exports(hf_store, state, videos_by_id)
+                if decision_store is not None:
+                    st.info("Firestore decisions are synced to HF by the Cloud Run Job.")
+                else:
+                    write_hf_exports(hf_store, state, videos_by_id)
             else:
                 write_exports(state, videos_by_id)
-            st.success("Exported")
+                st.success("Exported")
 
         st.divider()
         st.subheader("Buckets")
@@ -678,8 +692,46 @@ def main() -> None:
 
     if hf_store is not None:
         current_cached = hf_store.is_video_cached(video)
-        with st.spinner("Downloading video from HF Dataset..."):
-            video_path = hf_store.download_video(video)
+        try:
+            if current_cached:
+                video_path = hf_store.download_video(video)
+            else:
+                with st.spinner(
+                    f"Downloading video from HF Dataset... ({HF_DOWNLOAD_TIMEOUT_SECONDS}s timeout)"
+                ):
+                    video_path = hf_store.download_video_async(video).result(
+                        timeout=HF_DOWNLOAD_TIMEOUT_SECONDS
+                    )
+        except TimeoutError:
+            classify_hf_video(
+                hf_store,
+                decision_store,
+                state,
+                video,
+                "annotation_problem",
+                videos_by_id,
+                {
+                    "annotation_problem_reason": "hf_download_timeout",
+                    "annotation_problem_seconds": HF_DOWNLOAD_TIMEOUT_SECONDS,
+                },
+            )
+            st.warning("Video download took too long. Marked as annotation problem.")
+            st.rerun()
+        except Exception as exc:
+            classify_hf_video(
+                hf_store,
+                decision_store,
+                state,
+                video,
+                "annotation_problem",
+                videos_by_id,
+                {
+                    "annotation_problem_reason": "hf_download_error",
+                    "annotation_problem_error_type": type(exc).__name__,
+                },
+            )
+            st.warning("Video download failed. Marked as annotation problem.")
+            st.rerun()
         prefetched_ids = st.session_state.setdefault("hf_prefetched_video_ids", set())
         prefetch_videos = [
             item
