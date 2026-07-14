@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import sys
 from concurrent.futures import TimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,17 +12,14 @@ from typing import Any
 
 import streamlit as st
 
-try:
-    from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
-    from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
-    from annotation_app.common.hf_tokens import get_config_value, get_storage_backend
-except ModuleNotFoundError:
-    from common.firestore_decision_store import FirestoreDecisionStore
-    from common.hf_dataset_store import DATASET_ID, HfDatasetStore
-    from common.hf_tokens import get_config_value, get_storage_backend
-
-
 ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
+from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
+from annotation_app.common.hf_tokens import get_config_value, get_storage_backend
+
 RAW_DATASET_DIR = Path(os.getenv("RAW_DATASET_DIR", ROOT / "raw_dataset"))
 DATASET_DIR = Path(os.getenv("DATASET_DIR", ROOT / "datasets" / "manual_seed_v2"))
 ANNOTATIONS_DIR = DATASET_DIR / "annotations"
