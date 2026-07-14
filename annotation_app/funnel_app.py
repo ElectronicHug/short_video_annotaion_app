@@ -5,6 +5,8 @@ import os
 import random
 import re
 import sys
+import hmac
+from collections.abc import Mapping
 from concurrent.futures import TimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
@@ -35,32 +37,32 @@ CATEGORIES = [
     {
         "id": "matched",
         "label": "Matched",
-        "help": "Speech matches visible subtitles/text.",
+        "help": "На відео лише субтитри, які співпадають з тим, що говориться.",
     },
     {
         "id": "title_matched",
-        "label": "Title matched",
-        "help": "Title/static text matches; subtitles may be absent.",
+        "label": "Title + Matched",
+        "help": "Є статичний текст, який не говориться, плюс субтитри співпадають з мовленням.",
     },
     {
         "id": "partially_matched",
-        "label": "Partly matched",
-        "help": "Only part of the visible text matches.",
+        "label": "Partly Matched",
+        "help": "Частково збігаються: приблизно 80% або більше.",
     },
     {
         "id": "unmatched",
         "label": "Unmatched",
-        "help": "Visible text does not match the speech/title.",
+        "help": "Є текст, який не збігається взагалі або збігається менше ніж на 80%.",
     },
     {
         "id": "annotation_problem",
         "label": "Annotation problem",
-        "help": "Technical/load issue or impossible to annotate reliably.",
+        "help": "Технічна проблема або неможливо надійно розмітити.",
     },
     {
         "id": "ignore",
         "label": "Ignore",
-        "help": "Not useful for the dataset.",
+        "help": "Немає субтитрів і статичного тексту.",
     },
 ]
 CATEGORY_BY_ID = {category["id"]: category for category in CATEGORIES}
@@ -214,6 +216,74 @@ def get_decision_backend() -> str:
     return "hf"
 
 
+def streamlit_secret_value(name: str) -> Any:
+    try:
+        return st.secrets.get(name)
+    except Exception:
+        return None
+
+
+def load_auth_users() -> dict[str, dict[str, str]]:
+    raw_users = streamlit_secret_value("auth_users")
+    if not isinstance(raw_users, Mapping):
+        return {}
+
+    users: dict[str, dict[str, str]] = {}
+    for user_id, raw_profile in raw_users.items():
+        if isinstance(raw_profile, Mapping):
+            password = str(raw_profile.get("password", ""))
+            display_name = str(raw_profile.get("display_name", user_id))
+            role = str(raw_profile.get("role", "annotator"))
+        else:
+            password = str(raw_profile)
+            display_name = str(user_id)
+            role = "annotator"
+        if password:
+            users[str(user_id)] = {
+                "password": password,
+                "display_name": display_name,
+                "role": role,
+            }
+    return users
+
+
+def require_login() -> dict[str, str] | None:
+    users = load_auth_users()
+    if not users:
+        annotator_id = get_config_value("ANNOTATOR_ID", "default")
+        return {
+            "id": annotator_id,
+            "display_name": annotator_id,
+            "role": "local",
+        }
+
+    if st.session_state.get("auth_user_id") in users:
+        user_id = str(st.session_state["auth_user_id"])
+        return {"id": user_id, **users[user_id]}
+
+    st.subheader("Вхід")
+    with st.form("login_form"):
+        selected_user = st.selectbox(
+            "Профіль",
+            options=list(users),
+            format_func=lambda user_id: users[user_id]["display_name"],
+        )
+        password = st.text_input("Пароль", type="password")
+        submitted = st.form_submit_button("Увійти", type="primary", use_container_width=True)
+
+    if submitted:
+        expected = users[selected_user]["password"]
+        if hmac.compare_digest(password, expected):
+            st.session_state["auth_user_id"] = selected_user
+            st.rerun()
+        st.error("Неправильний пароль")
+    return None
+
+
+def current_annotator_id() -> str:
+    return str(st.session_state.get("auth_user_id") or get_config_value("ANNOTATOR_ID", "default"))
+
+
 def load_state() -> dict[str, Any]:
     state = read_json(STATE_PATH, default_state())
     if not isinstance(state, dict):
@@ -289,6 +359,7 @@ def export_rows(state: dict[str, Any], videos_by_id: dict[str, dict[str, Any]]) 
                 "video_id": video_id,
                 "category": decision.get("category"),
                 "category_label": CATEGORY_BY_ID.get(decision.get("category"), {}).get("label"),
+                "annotator_id": decision.get("annotator_id"),
                 "video_path": video.get("video_relpath") or decision.get("video_path"),
                 "info_path": video.get("info_relpath") or decision.get("info_path"),
                 "duration_seconds": video.get("duration_seconds") or decision.get("duration_seconds"),
@@ -401,6 +472,7 @@ def classify_video(
     previous_decision = state.get("decisions", {}).get(video_id)
     state.setdefault("decisions", {})[video_id] = {
         "category": category_id,
+        "annotator_id": current_annotator_id(),
         "video_path": video["video_relpath"],
         "info_path": video["info_relpath"],
         "duration_seconds": video["duration_seconds"],
@@ -440,6 +512,7 @@ def classify_hf_video(
     previous_decision = state.get("decisions", {}).get(video_id)
     decision = {
         "category": category_id,
+        "annotator_id": current_annotator_id(),
         "video_path": video["video_path"],
         "info_path": video.get("info_path"),
         "duration_seconds": video["duration_seconds"],
@@ -462,7 +535,7 @@ def classify_hf_video(
             dataset_id=state.get("dataset_id") or DATASET_ID,
             video_id=video_id,
             decision=decision,
-            annotator_id=get_config_value("ANNOTATOR_ID", "default"),
+            annotator_id=decision.get("annotator_id") or current_annotator_id(),
         )
     else:
         write_hf_exports(store, state, videos_by_id)
@@ -505,7 +578,7 @@ def undo_hf_last(
                 dataset_id=state.get("dataset_id") or DATASET_ID,
                 video_id=video_id,
                 decision=previous_decision,
-                annotator_id=get_config_value("ANNOTATOR_ID", "default"),
+                annotator_id=previous_decision.get("annotator_id") or current_annotator_id(),
             )
     else:
         state.setdefault("decisions", {}).pop(video_id, None)
@@ -558,7 +631,7 @@ def main() -> None:
             border: 1px solid #d7dde5;
             margin-left: auto;
             margin-right: auto;
-            width: 70%;
+            width: 58%;
             overflow: hidden;
         }
         div.stButton > button {
@@ -578,11 +651,32 @@ def main() -> None:
             margin-top: 1rem;
             padding-top: 0.75rem;
         }
+        .glossary-box {
+            border-left: 3px solid #2563eb;
+            color: #334155;
+            font-size: 0.92rem;
+            line-height: 1.45;
+            margin: 0.5rem 0 1rem;
+            padding: 0.25rem 0 0.25rem 0.8rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
     st.title("Data Annotation Funnel")
+    active_user = require_login()
+    if active_user is None:
+        return
+    st.markdown(
+        """
+        <div class="glossary-box">
+          <strong>Субтитри</strong> - написано те, що говориться.<br>
+          <strong>Статичний текст</strong> - текст присутній, але не озвучений.<br>
+          <strong>Текст</strong> = субтитри + статичний текст.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     storage_backend = get_storage_backend()
     decision_backend = get_decision_backend()
@@ -610,6 +704,12 @@ def main() -> None:
         state = load_state()
 
     with st.sidebar:
+        st.caption(f"Профіль: {active_user['display_name']}")
+        st.caption(f"Роль: {active_user['role']}")
+        if st.button("Вийти", use_container_width=True):
+            st.session_state.pop("auth_user_id", None)
+            st.rerun()
+        st.divider()
         if hf_store is not None:
             st.caption("Backend: HF Dataset")
             st.caption(f"Repo: {hf_store.repo_id}")
@@ -774,7 +874,7 @@ def main() -> None:
             st.link_button("Open Source URL", video["webpage_url"])
 
     with action_col:
-        st.subheader("Classify")
+        st.subheader("Класифікація")
         for category in CATEGORIES:
             if st.button(category["label"], use_container_width=True):
                 if hf_store is not None:

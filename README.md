@@ -159,6 +159,26 @@ HF_TOKEN_READ = "hf_..."
 GCP_PROJECT_ID = "short-video-dataset-ocr"
 FIRESTORE_COLLECTION = "funnel_decisions"
 
+[auth_users.zhenya]
+display_name = "Zhenya"
+role = "owner"
+password = "..."
+
+[auth_users.colleague]
+display_name = "Колега"
+role = "reviewer"
+password = "..."
+
+[auth_users.annotator_1]
+display_name = "Анотатор 1"
+role = "annotator"
+password = "..."
+
+[auth_users.annotator_2]
+display_name = "Анотатор 2"
+role = "annotator"
+password = "..."
+
 [gcp_service_account]
 type = "service_account"
 project_id = "short-video-dataset-ocr"
