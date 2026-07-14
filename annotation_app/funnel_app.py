@@ -35,6 +35,7 @@ HF_PREFETCH_AHEAD = 2
 HF_DOWNLOAD_TIMEOUT_SECONDS = 20
 HF_VIDEO_MODE_DIRECT_URL = "url"
 HF_VIDEO_MODE_DOWNLOAD = "download"
+DEFAULT_VIDEO_WIDTH_PERCENT = 88
 
 CATEGORIES = [
     {
@@ -329,6 +330,12 @@ def remember_download_problem(video: dict[str, Any], reason: str, detail: str) -
         "detail": detail,
         "time": now_iso(),
     }
+
+
+def video_column_weights(width_percent: int) -> list[float]:
+    center = max(0.55, min(1.0, width_percent / 100))
+    side = max(0.0, (1.0 - center) / 2)
+    return [side, center, side]
 
 
 def load_state() -> dict[str, Any]:
@@ -768,6 +775,15 @@ def main() -> None:
         else:
             st.caption(f"Source: {RAW_DATASET_DIR}")
             st.caption(f"Target: {DATASET_DIR}")
+        video_width_percent = st.slider(
+            "Video width",
+            min_value=55,
+            max_value=100,
+            value=int(st.session_state.get("video_width_percent", DEFAULT_VIDEO_WIDTH_PERCENT)),
+            step=5,
+            help="Adjust video size for this browser session.",
+        )
+        st.session_state["video_width_percent"] = video_width_percent
         randomize = st.toggle("Random order", value=False)
         rescan_label = "Reload HF manifest" if hf_store is not None else "Rescan raw_dataset"
         if st.button(rescan_label, use_container_width=True):
@@ -939,10 +955,10 @@ def main() -> None:
             st.sidebar.caption("Prefetch queue: already warm or empty")
     else:
         video_path = Path(video["video_path"])
-    main_col, action_col = st.columns([1.55, 1], gap="large")
+    main_col, action_col = st.columns([1.9, 1], gap="large")
 
     with main_col:
-        video_left, video_center, video_right = st.columns([0.18, 0.64, 0.18])
+        video_left, video_center, video_right = st.columns(video_column_weights(video_width_percent))
         with video_center:
             st.video(str(video_path))
         st.markdown(
