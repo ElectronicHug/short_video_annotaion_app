@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import streamlit as st
+from huggingface_hub import hf_hub_url
 
 ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
 if str(ROOT) not in sys.path:
@@ -223,6 +224,17 @@ def get_hf_video_mode() -> str:
     if mode in {HF_VIDEO_MODE_DIRECT_URL, HF_VIDEO_MODE_DOWNLOAD}:
         return mode
     return HF_VIDEO_MODE_DIRECT_URL
+
+
+def hf_video_url(store: HfDatasetStore, video: dict[str, Any]) -> str:
+    video_url_method = getattr(store, "video_url", None)
+    if callable(video_url_method):
+        return str(video_url_method(video))
+    return hf_hub_url(
+        repo_id=store.repo_id,
+        filename=str(video["video_path"]),
+        repo_type="dataset",
+    )
 
 
 def streamlit_secret_value(name: str) -> Any:
@@ -837,7 +849,7 @@ def main() -> None:
             set_current_video(state, video["video_id"])
 
     if hf_store is not None and hf_video_mode == HF_VIDEO_MODE_DIRECT_URL:
-        video_path = hf_store.video_url(video)
+        video_path = hf_video_url(hf_store, video)
         st.sidebar.divider()
         st.sidebar.subheader("HF Video")
         st.sidebar.caption("Mode: direct URL")
