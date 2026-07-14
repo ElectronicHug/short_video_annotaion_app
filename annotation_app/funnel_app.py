@@ -238,6 +238,21 @@ def hf_video_url(store: HfDatasetStore, video: dict[str, Any]) -> str:
     )
 
 
+def resolve_video_source(store: HfDatasetStore | None, video: dict[str, Any]) -> tuple[str | None, str]:
+    gcs_url = video.get("video_gcs_url")
+    if isinstance(gcs_url, str) and gcs_url:
+        return gcs_url, "gcs"
+    mirror_url = video.get("video_mirror_url") or video.get("video_cdn_url")
+    if isinstance(mirror_url, str) and mirror_url:
+        return mirror_url, "mirror"
+    if store is not None and video.get("video_path"):
+        return hf_video_url(store, video), "hf"
+    source_url = video.get("webpage_url")
+    if isinstance(source_url, str) and source_url:
+        return source_url, "source_link"
+    return None, "missing"
+
+
 def streamlit_secret_value(name: str) -> Any:
     try:
         return st.secrets.get(name)
@@ -865,10 +880,10 @@ def main() -> None:
             set_current_video(state, video["video_id"])
 
     if hf_store is not None and hf_video_mode == HF_VIDEO_MODE_DIRECT_URL:
-        video_path = hf_video_url(hf_store, video)
+        video_path, video_source = resolve_video_source(hf_store, video)
         st.sidebar.divider()
         st.sidebar.subheader("HF Video")
-        st.sidebar.caption("Mode: direct URL")
+        st.sidebar.caption(f"Mode: direct URL ({video_source})")
         st.sidebar.caption(f"Size: {describe_video_size(video)}")
     elif hf_store is not None:
         current_cached = hf_store.is_video_cached(video)
@@ -947,6 +962,7 @@ def main() -> None:
         st.sidebar.subheader("HF Cache")
         st.sidebar.caption(f"Current video: {'cached' if current_cached else 'downloaded now'}")
         st.sidebar.caption(f"Current size: {describe_video_size(video)}")
+        video_source = "hf_download"
         if prefetch_videos:
             st.sidebar.caption("Prefetch queued:")
             for item in prefetch_videos:
@@ -955,12 +971,19 @@ def main() -> None:
             st.sidebar.caption("Prefetch queue: already warm or empty")
     else:
         video_path = Path(video["video_path"])
+        video_source = "local"
     main_col, action_col = st.columns([1.9, 1], gap="large")
 
     with main_col:
         video_left, video_center, video_right = st.columns(video_column_weights(video_width_percent))
         with video_center:
-            st.video(str(video_path))
+            if video_path and video_source != "source_link":
+                st.video(str(video_path))
+            elif video_path:
+                st.warning("Direct video file is unavailable. Open the source link manually.")
+                st.link_button("Open Source URL", str(video_path))
+            else:
+                st.error("No video URL is available for this item.")
         st.markdown(
             f"""
             <div class="meta-box">
