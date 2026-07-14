@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from google.cloud import firestore
@@ -22,15 +23,32 @@ def _streamlit_secret_value(name: str) -> Any:
         return None
 
 
+def _mapping_to_dict(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {str(key): item for key, item in value.items()}
+
+
 def _service_account_info() -> dict[str, Any] | None:
+    section_value = _streamlit_secret_value("gcp_service_account")
+    if isinstance(section_value, Mapping):
+        return _mapping_to_dict(section_value)
+
     raw_value = _streamlit_secret_value("GCP_SERVICE_ACCOUNT_JSON") or get_config_value(
         "GCP_SERVICE_ACCOUNT_JSON"
     )
     if not raw_value:
         return None
-    if isinstance(raw_value, dict):
-        return dict(raw_value)
-    return json.loads(str(raw_value))
+    if isinstance(raw_value, Mapping):
+        return _mapping_to_dict(raw_value)
+
+    text_value = str(raw_value).strip()
+    try:
+        return json.loads(text_value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "GCP_SERVICE_ACCOUNT_JSON must be valid JSON. In Streamlit secrets, "
+            "prefer a [gcp_service_account] table or use TOML literal triple quotes: "
+            "GCP_SERVICE_ACCOUNT_JSON = '''{...}'''."
+        ) from exc
 
 
 class FirestoreDecisionStore:

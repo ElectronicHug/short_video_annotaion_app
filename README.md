@@ -65,7 +65,10 @@ GCP_PROJECT_ID=short-video-dataset-ocr
 FIRESTORE_COLLECTION=funnel_decisions
 ```
 
-For Streamlit Community Cloud, add the same values to app secrets. Add `GCP_SERVICE_ACCOUNT_JSON` as the full service-account JSON string for Firestore writes. For local HF testing, the app can also read `../.hf_token` with `HF_TOKEN_READ = "..."` and `HF_TOKEN_WRITE = "..."`.
+For Streamlit Community Cloud, add the same values to app secrets. Prefer the
+`[gcp_service_account]` table shown below for Firestore writes. For local HF
+testing, the app can also read `../.hf_token` with `HF_TOKEN_READ = "..."` and
+`HF_TOKEN_WRITE = "..."`.
 
 ## GCP Firestore Decision Log
 
@@ -140,7 +143,22 @@ HF_DATASET_REPO = "ElectronicHug/short_video_ocr_dataset"
 HF_TOKEN_READ = "hf_..."
 GCP_PROJECT_ID = "short-video-dataset-ocr"
 FIRESTORE_COLLECTION = "funnel_decisions"
-GCP_SERVICE_ACCOUNT_JSON = """{"type":"service_account", "...":"..."}"""
+
+[gcp_service_account]
+type = "service_account"
+project_id = "short-video-dataset-ocr"
+private_key_id = "..."
+private_key = """-----BEGIN PRIVATE KEY-----
+...
+-----END PRIVATE KEY-----
+"""
+client_email = "streamlit-firestore-writer@short-video-dataset-ocr.iam.gserviceaccount.com"
+client_id = "..."
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "..."
+universe_domain = "googleapis.com"
 ```
 
 The Streamlit service account needs Firestore read/write permissions, for example `roles/datastore.user`.
