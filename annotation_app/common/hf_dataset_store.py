@@ -9,7 +9,7 @@ from typing import Any
 
 os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
-from huggingface_hub import HfApi, hf_hub_download, try_to_load_from_cache
+from huggingface_hub import HfApi, hf_hub_download, hf_hub_url, try_to_load_from_cache
 from huggingface_hub.errors import EntryNotFoundError
 
 from .hf_tokens import get_hf_dataset_repo, get_hf_token
@@ -73,6 +73,13 @@ class HfDatasetStore:
 
     def download_video(self, video: dict[str, Any]) -> Path:
         return self._download(str(video["video_path"]))
+
+    def video_url(self, video: dict[str, Any]) -> str:
+        return hf_hub_url(
+            repo_id=self.repo_id,
+            filename=str(video["video_path"]),
+            repo_type="dataset",
+        )
 
     def download_video_async(self, video: dict[str, Any]) -> Future[Path]:
         return _PREFETCH_EXECUTOR.submit(self.download_video, video)

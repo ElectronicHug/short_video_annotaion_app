@@ -78,6 +78,7 @@ HF_TOKEN_READ=<read token>
 HF_TOKEN_WRITE=<write token>
 GCP_PROJECT_ID=short-video-dataset-ocr
 FIRESTORE_COLLECTION=funnel_decisions
+HF_VIDEO_MODE=url
 ```
 
 For Streamlit Community Cloud, add the same values to app secrets. Prefer the
@@ -158,6 +159,7 @@ HF_DATASET_REPO = "ElectronicHug/short_video_ocr_dataset"
 HF_TOKEN_READ = "hf_..."
 GCP_PROJECT_ID = "short-video-dataset-ocr"
 FIRESTORE_COLLECTION = "funnel_decisions"
+HF_VIDEO_MODE = "url"
 
 [auth_users.zhenya]
 display_name = "Zhenya"

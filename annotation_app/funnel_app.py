@@ -32,6 +32,8 @@ MAX_DURATION_SECONDS = 60
 HISTORY_LIMIT = 2
 HF_PREFETCH_AHEAD = 2
 HF_DOWNLOAD_TIMEOUT_SECONDS = 20
+HF_VIDEO_MODE_DIRECT_URL = "url"
+HF_VIDEO_MODE_DOWNLOAD = "download"
 
 CATEGORIES = [
     {
@@ -214,6 +216,13 @@ def get_decision_backend() -> str:
     if get_config_value("FIRESTORE_PROJECT_ID") or get_config_value("GCP_PROJECT_ID"):
         return "firestore"
     return "hf"
+
+
+def get_hf_video_mode() -> str:
+    mode = get_config_value("HF_VIDEO_MODE", HF_VIDEO_MODE_DIRECT_URL).lower()
+    if mode in {HF_VIDEO_MODE_DIRECT_URL, HF_VIDEO_MODE_DOWNLOAD}:
+        return mode
+    return HF_VIDEO_MODE_DIRECT_URL
 
 
 def streamlit_secret_value(name: str) -> Any:
@@ -708,6 +717,7 @@ def main() -> None:
 
     storage_backend = get_storage_backend()
     decision_backend = get_decision_backend()
+    hf_video_mode = get_hf_video_mode()
     hf_store = None
     decision_store: FirestoreDecisionStore | None = None
     if storage_backend == "hf":
@@ -742,6 +752,7 @@ def main() -> None:
             st.caption("Backend: HF Dataset")
             st.caption(f"Repo: {hf_store.repo_id}")
             st.caption(f"Decision log: {decision_backend}")
+            st.caption(f"Video mode: {hf_video_mode}")
         else:
             st.caption(f"Source: {RAW_DATASET_DIR}")
             st.caption(f"Target: {DATASET_DIR}")
@@ -825,7 +836,13 @@ def main() -> None:
         else:
             set_current_video(state, video["video_id"])
 
-    if hf_store is not None:
+    if hf_store is not None and hf_video_mode == HF_VIDEO_MODE_DIRECT_URL:
+        video_path = hf_store.video_url(video)
+        st.sidebar.divider()
+        st.sidebar.subheader("HF Video")
+        st.sidebar.caption("Mode: direct URL")
+        st.sidebar.caption(f"Size: {describe_video_size(video)}")
+    elif hf_store is not None:
         current_cached = hf_store.is_video_cached(video)
         futures = hf_download_futures()
         current_future = futures.get(video["video_id"])
