@@ -1,0 +1,232 @@
+# Short Video Annotation App
+
+Streamlit annotation tools for the short-video OCR dataset.
+
+This repository contains app code only. Videos, manifests, annotation state, and exports are stored in the Hugging Face Dataset repo:
+
+```text
+ElectronicHug/short_video_ocr_dataset
+```
+
+## Streamlit Deployments
+
+Deploy this same GitHub repo as separate Streamlit Community Cloud apps by selecting different main file paths:
+
+```text
+annotation_app/funnel_app.py
+annotation_app/dedup_app.py
+annotation_app/text_label_app.py
+```
+
+## Local Setup
+
+Base environment: `vlm-env` with Python `3.13.14`.
+
+```powershell
+..\vlm-env\python.exe -m pip install -r requirements.txt
+```
+
+Run locally:
+
+```powershell
+..\vlm-env\python.exe -m streamlit run annotation_app\funnel_app.py
+..\vlm-env\python.exe -m streamlit run annotation_app\dedup_app.py
+..\vlm-env\python.exe -m streamlit run annotation_app\text_label_app.py
+```
+
+## Data Layout
+
+Local filesystem defaults:
+
+```text
+raw_dataset/
+datasets/manual_seed_v2/
+results/
+```
+
+Path overrides:
+
+```text
+APP_ROOT
+RAW_DATASET_DIR
+DATASET_DIR
+RESULTS_DIR
+```
+
+Future hosted mode should read/write through:
+
+```text
+STORAGE_BACKEND=hf
+DECISION_BACKEND=firestore
+HF_DATASET_REPO=ElectronicHug/short_video_ocr_dataset
+HF_TOKEN_READ=<read token>
+HF_TOKEN_WRITE=<write token>
+GCP_PROJECT_ID=short-video-dataset-ocr
+FIRESTORE_COLLECTION=funnel_decisions
+```
+
+For Streamlit Community Cloud, add the same values to app secrets. Add `GCP_SERVICE_ACCOUNT_JSON` as the full service-account JSON string for Firestore writes. For local HF testing, the app can also read `../.hf_token` with `HF_TOKEN_READ = "..."` and `HF_TOKEN_WRITE = "..."`.
+
+## GCP Firestore Decision Log
+
+Target project and region:
+
+```text
+GCP_PROJECT_ID=short-video-dataset-ocr
+GCP_REGION=europe-central2
+```
+
+Enable APIs:
+
+```powershell
+gcloud config set project short-video-dataset-ocr
+gcloud services enable firestore.googleapis.com
+gcloud services enable run.googleapis.com
+gcloud services enable cloudscheduler.googleapis.com
+gcloud services enable artifactregistry.googleapis.com
+gcloud services enable secretmanager.googleapis.com
+```
+
+Create Firestore database:
+
+```powershell
+gcloud firestore databases create `
+  --database="(default)" `
+  --location=europe-central2
+```
+
+Local auth for Firestore Python clients:
+
+```powershell
+gcloud auth application-default login
+```
+
+Firestore collection:
+
+```text
+funnel_decisions/{dataset_id}__funnel__{video_id}
+```
+
+Document shape:
+
+```json
+{
+  "dataset_id": "short_video_ocr_dataset",
+  "task": "funnel",
+  "video_id": "...",
+  "annotator_id": "default",
+  "category": "matched",
+  "decision": {
+    "category": "matched",
+    "video_path": "videos/...mp4",
+    "info_path": "videos/...info.json",
+    "duration_seconds": 12.3,
+    "title": "...",
+    "uploader": "...",
+    "webpage_url": "...",
+    "classified_at": "..."
+  },
+  "updated_at": "<server timestamp>",
+  "synced_to_hf_at": null
+}
+```
+
+## Streamlit Community Cloud Secrets
+
+```toml
+STORAGE_BACKEND = "hf"
+DECISION_BACKEND = "firestore"
+HF_DATASET_REPO = "ElectronicHug/short_video_ocr_dataset"
+HF_TOKEN_READ = "hf_..."
+GCP_PROJECT_ID = "short-video-dataset-ocr"
+FIRESTORE_COLLECTION = "funnel_decisions"
+GCP_SERVICE_ACCOUNT_JSON = """{"type":"service_account", "...":"..."}"""
+```
+
+The Streamlit service account needs Firestore read/write permissions, for example `roles/datastore.user`.
+
+## Cloud Run Sync Job
+
+The sync job reads Firestore decisions and writes one HF Dataset commit containing:
+
+```text
+annotations/funnel_state.json
+annotations/funnel_export.jsonl
+buckets/*/videos.json
+buckets/*/videos.jsonl
+```
+
+Create a secret for the HF write token:
+
+```powershell
+gcloud secrets create hf-token-write --replication-policy="automatic"
+gcloud secrets versions add hf-token-write --data-file=hf_token_write.txt
+```
+
+Create Artifact Registry repository:
+
+```powershell
+gcloud artifacts repositories create short-video-ocr `
+  --repository-format=docker `
+  --location=europe-central2
+```
+
+Build and push the sync image:
+
+```powershell
+gcloud builds submit `
+  --config cloudbuild.sync.yaml `
+  --substitutions _IMAGE=europe-central2-docker.pkg.dev/short-video-dataset-ocr/short-video-ocr/funnel-sync:latest
+```
+
+Grant the Cloud Run job service account access to Firestore and the HF token secret. For the default Compute service account:
+
+```powershell
+$PROJECT_NUMBER = gcloud projects describe short-video-dataset-ocr --format="value(projectNumber)"
+$RUN_SA = "$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
+
+gcloud projects add-iam-policy-binding short-video-dataset-ocr `
+  --member="serviceAccount:$RUN_SA" `
+  --role="roles/datastore.user"
+
+gcloud secrets add-iam-policy-binding hf-token-write `
+  --member="serviceAccount:$RUN_SA" `
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud projects add-iam-policy-binding short-video-dataset-ocr `
+  --member="serviceAccount:$RUN_SA" `
+  --role="roles/run.developer"
+```
+
+Create the Cloud Run Job:
+
+```powershell
+gcloud run jobs create funnel-sync-to-hf `
+  --image europe-central2-docker.pkg.dev/short-video-dataset-ocr/short-video-ocr/funnel-sync:latest `
+  --region europe-central2 `
+  --set-env-vars STORAGE_BACKEND=hf,DECISION_BACKEND=firestore,GCP_PROJECT_ID=short-video-dataset-ocr,HF_DATASET_REPO=ElectronicHug/short_video_ocr_dataset,FIRESTORE_COLLECTION=funnel_decisions `
+  --set-secrets HF_TOKEN_WRITE=hf-token-write:latest,HF_TOKEN_READ=hf-token-write:latest
+```
+
+Run manually:
+
+```powershell
+gcloud run jobs execute funnel-sync-to-hf --region europe-central2 --wait
+```
+
+Schedule every 15 minutes:
+
+```powershell
+gcloud scheduler jobs create http funnel-sync-to-hf-every-15m `
+  --location=europe-central2 `
+  --schedule="*/15 * * * *" `
+  --uri="https://run.googleapis.com/v2/projects/short-video-dataset-ocr/locations/europe-central2/jobs/funnel-sync-to-hf:run" `
+  --http-method=POST `
+  --oauth-service-account-email="$RUN_SA"
+```
+
+## Rules
+
+- Do not commit videos, frames, results, tokens, or `.env`.
+- Store annotation state and exports in the HF Dataset repo, not in Streamlit Cloud local disk.
+- Keep app code separate from dataset artifacts.
