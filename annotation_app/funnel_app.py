@@ -284,6 +284,32 @@ def current_annotator_id() -> str:
     return str(st.session_state.get("auth_user_id") or get_config_value("ANNOTATOR_ID", "default"))
 
 
+def hf_download_futures() -> dict[str, Any]:
+    futures = st.session_state.setdefault("hf_download_futures", {})
+    return futures if isinstance(futures, dict) else {}
+
+
+def describe_video_size(video: dict[str, Any]) -> str:
+    filesize = video.get("filesize")
+    if not filesize:
+        return "unknown size"
+    try:
+        return f"{float(filesize) / 1024 / 1024:.1f} MB"
+    except (TypeError, ValueError):
+        return "unknown size"
+
+
+def remember_download_problem(video: dict[str, Any], reason: str, detail: str) -> None:
+    st.session_state["last_download_problem"] = {
+        "video_id": video.get("video_id"),
+        "video_path": video.get("video_path"),
+        "size": describe_video_size(video),
+        "reason": reason,
+        "detail": detail,
+        "time": now_iso(),
+    }
+
+
 def load_state() -> dict[str, Any]:
     state = read_json(STATE_PATH, default_state())
     if not isinstance(state, dict):
@@ -631,7 +657,8 @@ def main() -> None:
             border: 1px solid #d7dde5;
             margin-left: auto;
             margin-right: auto;
-            width: 58%;
+            width: 100%;
+            max-height: 58vh;
             overflow: hidden;
         }
         div.stButton > button {
@@ -641,8 +668,9 @@ def main() -> None:
         .decision-help {
             color: #64748b;
             font-size: 0.88rem;
-            margin-top: -0.4rem;
-            min-height: 1.6rem;
+            line-height: 1.25;
+            min-height: 3.3rem;
+            padding-top: 0.15rem;
         }
         .meta-box {
             border-top: 1px solid #e5e7eb;
@@ -743,6 +771,15 @@ def main() -> None:
                 write_exports(state, videos_by_id)
                 st.success("Exported")
 
+        last_problem = st.session_state.get("last_download_problem")
+        if isinstance(last_problem, dict):
+            st.divider()
+            st.subheader("Last download problem")
+            st.caption(f"Video: {last_problem.get('video_id')}")
+            st.caption(f"Size: {last_problem.get('size')}")
+            st.caption(f"Reason: {last_problem.get('reason')}")
+            st.caption(f"Detail: {last_problem.get('detail')}")
+
         st.divider()
         st.subheader("Buckets")
         counts = {category["id"]: 0 for category in CATEGORIES}
@@ -790,17 +827,29 @@ def main() -> None:
 
     if hf_store is not None:
         current_cached = hf_store.is_video_cached(video)
+        futures = hf_download_futures()
+        current_future = futures.get(video["video_id"])
         try:
             if current_cached:
                 video_path = hf_store.download_video(video)
             else:
+                if current_future is None:
+                    current_future = hf_store.download_video_async(video)
+                    futures[video["video_id"]] = current_future
                 with st.spinner(
                     f"Downloading video from HF Dataset... ({HF_DOWNLOAD_TIMEOUT_SECONDS}s timeout)"
                 ):
-                    video_path = hf_store.download_video_async(video).result(
-                        timeout=HF_DOWNLOAD_TIMEOUT_SECONDS
-                    )
+                    video_path = current_future.result(timeout=HF_DOWNLOAD_TIMEOUT_SECONDS)
+                futures.pop(video["video_id"], None)
         except TimeoutError:
+            if current_future is not None:
+                current_future.cancel()
+            futures.pop(video["video_id"], None)
+            remember_download_problem(
+                video,
+                "hf_download_timeout",
+                f"Timed out after {HF_DOWNLOAD_TIMEOUT_SECONDS}s; file size {describe_video_size(video)}",
+            )
             classify_hf_video(
                 hf_store,
                 decision_store,
@@ -816,6 +865,12 @@ def main() -> None:
             st.warning("Video download took too long. Marked as annotation problem.")
             st.rerun()
         except Exception as exc:
+            futures.pop(video["video_id"], None)
+            remember_download_problem(
+                video,
+                "hf_download_error",
+                f"{type(exc).__name__}: {str(exc)[:240]}",
+            )
             classify_hf_video(
                 hf_store,
                 decision_store,
@@ -830,7 +885,6 @@ def main() -> None:
             )
             st.warning("Video download failed. Marked as annotation problem.")
             st.rerun()
-        prefetched_ids = st.session_state.setdefault("hf_prefetched_video_ids", set())
         prefetch_videos = [
             item
             for item in select_prefetch_videos(
@@ -839,26 +893,29 @@ def main() -> None:
                 video["video_id"],
                 limit=HF_PREFETCH_AHEAD,
             )
-            if item["video_id"] not in prefetched_ids
+            if item["video_id"] not in futures and not hf_store.is_video_cached(item)
         ]
         if prefetch_videos:
-            hf_store.prefetch_videos(prefetch_videos)
-            prefetched_ids.update(item["video_id"] for item in prefetch_videos)
+            for item in prefetch_videos:
+                futures[item["video_id"]] = hf_store.download_video_async(item)
         st.sidebar.divider()
         st.sidebar.subheader("HF Cache")
-        st.sidebar.caption(f"Current video: {'cached' if current_cached else 'downloading'}")
+        st.sidebar.caption(f"Current video: {'cached' if current_cached else 'downloaded now'}")
+        st.sidebar.caption(f"Current size: {describe_video_size(video)}")
         if prefetch_videos:
             st.sidebar.caption("Prefetch queued:")
             for item in prefetch_videos:
-                st.sidebar.caption(f"- {item['video_id']}")
+                st.sidebar.caption(f"- {item['video_id']} ({describe_video_size(item)})")
         else:
             st.sidebar.caption("Prefetch queue: already warm or empty")
     else:
         video_path = Path(video["video_path"])
-    main_col, action_col = st.columns([3, 1], gap="large")
+    main_col, action_col = st.columns([1.55, 1], gap="large")
 
     with main_col:
-        st.video(str(video_path))
+        video_left, video_center, video_right = st.columns([0.18, 0.64, 0.18])
+        with video_center:
+            st.video(str(video_path))
         st.markdown(
             f"""
             <div class="meta-box">
@@ -876,16 +933,20 @@ def main() -> None:
     with action_col:
         st.subheader("Класифікація")
         for category in CATEGORIES:
-            if st.button(category["label"], use_container_width=True):
+            button_col, help_col = st.columns([0.9, 1.25], gap="small")
+            with button_col:
+                clicked = st.button(category["label"], use_container_width=True)
+            with help_col:
+                st.markdown(
+                    f"<div class='decision-help'>{category['help']}</div>",
+                    unsafe_allow_html=True,
+                )
+            if clicked:
                 if hf_store is not None:
                     classify_hf_video(hf_store, decision_store, state, video, category["id"], videos_by_id)
                 else:
                     classify_video(state, video, category["id"], videos_by_id)
                 st.rerun()
-            st.markdown(
-                f"<div class='decision-help'>{category['help']}</div>",
-                unsafe_allow_html=True,
-            )
 
     updated_at = state.get("updated_at")
     if updated_at:

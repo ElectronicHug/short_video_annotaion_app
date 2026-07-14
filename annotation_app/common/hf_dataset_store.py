@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from concurrent.futures import Future, ThreadPoolExecutor
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
+
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 from huggingface_hub import HfApi, hf_hub_download, try_to_load_from_cache
 from huggingface_hub.errors import EntryNotFoundError
@@ -15,7 +18,7 @@ from .hf_tokens import get_hf_dataset_repo, get_hf_token
 DATASET_ID = "short_video_ocr_dataset"
 FUNNEL_STATE_PATH = "annotations/funnel_state.json"
 FUNNEL_EXPORT_PATH = "annotations/funnel_export.jsonl"
-PREFETCH_WORKERS = 2
+PREFETCH_WORKERS = 4
 
 
 _PREFETCH_EXECUTOR = ThreadPoolExecutor(max_workers=PREFETCH_WORKERS)
