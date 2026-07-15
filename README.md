@@ -229,6 +229,34 @@ buckets/*/videos.json
 buckets/*/videos.jsonl
 ```
 
+Text frame correction sync reads Firestore frame annotations and writes one HF
+Dataset commit containing:
+
+```text
+annotations/text_frame_corrections.jsonl
+annotations/text_video_state.json
+```
+
+Run text sync locally:
+
+```powershell
+..\vlm-env\python.exe scripts\sync_text_frame_annotations_firestore_to_hf.py
+```
+
+For local runs, either configure Application Default Credentials:
+
+```powershell
+gcloud auth application-default login
+```
+
+or point `GOOGLE_APPLICATION_CREDENTIALS` to a local service-account JSON file
+that is not committed to git:
+
+```powershell
+$env:GOOGLE_APPLICATION_CREDENTIALS = "C:\path\to\service-account.json"
+..\vlm-env\python.exe scripts\sync_text_frame_annotations_firestore_to_hf.py
+```
+
 Create a secret for the HF write token:
 
 ```powershell
@@ -250,6 +278,14 @@ Build and push the sync image:
 gcloud builds submit `
   --config cloudbuild.sync.yaml `
   --substitutions _IMAGE=europe-central2-docker.pkg.dev/short-video-dataset-ocr/short-video-ocr/funnel-sync:latest
+```
+
+Build and push the text correction sync image:
+
+```powershell
+gcloud builds submit `
+  --config cloudbuild.sync.yaml `
+  --substitutions _DOCKERFILE=Dockerfile.text-sync,_IMAGE=europe-central2-docker.pkg.dev/short-video-dataset-ocr/short-video-ocr/text-frame-sync:latest
 ```
 
 Grant the Cloud Run job service account access to Firestore and the HF token secret. For the default Compute service account:
@@ -281,10 +317,26 @@ gcloud run jobs create funnel-sync-to-hf `
   --set-secrets HF_TOKEN_WRITE=hf-token-write:latest,HF_TOKEN_READ=hf-token-write:latest
 ```
 
+Create the text correction Cloud Run Job:
+
+```powershell
+gcloud run jobs create text-frame-sync-to-hf `
+  --image europe-central2-docker.pkg.dev/short-video-dataset-ocr/short-video-ocr/text-frame-sync:latest `
+  --region europe-central2 `
+  --set-env-vars STORAGE_BACKEND=hf,DECISION_BACKEND=firestore,GCP_PROJECT_ID=short-video-dataset-ocr,HF_DATASET_REPO=ElectronicHug/short_video_ocr_dataset,FIRESTORE_TEXT_COLLECTION=text_frame_annotations `
+  --set-secrets HF_TOKEN_WRITE=hf-token-write:latest,HF_TOKEN_READ=hf-token-write:latest
+```
+
 Run manually:
 
 ```powershell
 gcloud run jobs execute funnel-sync-to-hf --region europe-central2 --wait
+```
+
+Run text sync manually:
+
+```powershell
+gcloud run jobs execute text-frame-sync-to-hf --region europe-central2 --wait
 ```
 
 Schedule every 15 minutes:

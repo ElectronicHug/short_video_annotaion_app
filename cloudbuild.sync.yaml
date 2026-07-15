@@ -3,9 +3,11 @@ steps:
     args:
       - build
       - -f
-      - Dockerfile.sync
+      - ${_DOCKERFILE}
       - -t
       - ${_IMAGE}
       - .
 images:
   - ${_IMAGE}
+substitutions:
+  _DOCKERFILE: Dockerfile.sync

@@ -18,6 +18,8 @@ from .hf_tokens import get_hf_dataset_repo, get_hf_token
 DATASET_ID = "short_video_ocr_dataset"
 FUNNEL_STATE_PATH = "annotations/funnel_state.json"
 FUNNEL_EXPORT_PATH = "annotations/funnel_export.jsonl"
+TEXT_FRAME_CORRECTIONS_PATH = "annotations/text_frame_corrections.jsonl"
+TEXT_VIDEO_STATE_PATH = "annotations/text_video_state.json"
 FRAMES_MANIFEST_PATH = "frames_manifest.jsonl"
 QWEN_FRAME_OCR_PATH = "ocr_predictions/qwen2_vl_2b_frame_ocr/qwen2_vl_2b_frame_ocr.jsonl"
 PREFETCH_WORKERS = 4
@@ -172,4 +174,35 @@ class HfDatasetStore:
             repo_id=self.repo_id,
             repo_type="dataset",
             commit_message="Update funnel annotations",
+        )
+
+    def upload_text_frame_outputs(
+        self,
+        *,
+        export_rows: list[dict[str, Any]],
+        video_state: dict[str, Any],
+    ) -> None:
+        out_dir = self.cache_dir / "text_outbox"
+        annotations_dir = out_dir / "annotations"
+        if out_dir.exists():
+            shutil.rmtree(out_dir)
+        annotations_dir.mkdir(parents=True, exist_ok=True)
+
+        export_path = annotations_dir / "text_frame_corrections.jsonl"
+        state_path = annotations_dir / "text_video_state.json"
+        export_path.write_text(
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in export_rows),
+            encoding="utf-8",
+        )
+        state_path.write_text(
+            json.dumps(video_state, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
+        self.api.upload_folder(
+            folder_path=str(out_dir),
+            path_in_repo="",
+            repo_id=self.repo_id,
+            repo_type="dataset",
+            commit_message="Update text frame annotations",
         )
