@@ -3,3 +3,4 @@ pandas>=2.2.0
 huggingface_hub>=0.25.0
 google-cloud-firestore>=2.20.0
 google-auth>=2.35.0
+requests>=2.32.0

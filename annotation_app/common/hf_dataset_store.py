@@ -18,6 +18,8 @@ from .hf_tokens import get_hf_dataset_repo, get_hf_token
 DATASET_ID = "short_video_ocr_dataset"
 FUNNEL_STATE_PATH = "annotations/funnel_state.json"
 FUNNEL_EXPORT_PATH = "annotations/funnel_export.jsonl"
+FRAMES_MANIFEST_PATH = "frames_manifest.jsonl"
+QWEN_FRAME_OCR_PATH = "ocr_predictions/qwen2_vl_2b_frame_ocr/qwen2_vl_2b_frame_ocr.jsonl"
 PREFETCH_WORKERS = 4
 
 
@@ -70,6 +72,25 @@ class HfDatasetStore:
             return default_state
         state = json.loads(path.read_text(encoding="utf-8"))
         return state if isinstance(state, dict) else default_state
+
+    def load_frames_manifest(self) -> list[dict[str, Any]]:
+        path = self._download(FRAMES_MANIFEST_PATH)
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
+
+    def load_qwen_frame_ocr(self) -> list[dict[str, Any]]:
+        try:
+            path = self._download(QWEN_FRAME_OCR_PATH)
+        except EntryNotFoundError:
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
 
     def download_video(self, video: dict[str, Any]) -> Path:
         return self._download(str(video["video_path"]))

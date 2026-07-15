@@ -8,14 +8,19 @@ This repository contains app code only. Videos, manifests, annotation state, and
 ElectronicHug/short_video_ocr_dataset
 ```
 
-## Streamlit Deployments
+## Streamlit Deployment
 
-Deploy this same GitHub repo as separate Streamlit Community Cloud apps by selecting different main file paths:
+Deploy this GitHub repo as one multipage Streamlit Community Cloud app:
 
 ```text
-annotation_app/funnel_app.py
-annotation_app/dedup_app.py
-annotation_app/text_label_app.py
+app.py
+```
+
+Pages:
+
+```text
+Funnel
+Text Frame Correction
 ```
 
 Funnel categories:
@@ -44,9 +49,14 @@ Base environment: `vlm-env` with Python `3.13.14`.
 Run locally:
 
 ```powershell
+..\vlm-env\python.exe -m streamlit run app.py
+```
+
+Direct page debugging:
+
+```powershell
 ..\vlm-env\python.exe -m streamlit run annotation_app\funnel_app.py
-..\vlm-env\python.exe -m streamlit run annotation_app\dedup_app.py
-..\vlm-env\python.exe -m streamlit run annotation_app\text_label_app.py
+..\vlm-env\python.exe -m streamlit run annotation_app\text_frame_correction_app.py
 ```
 
 ## Data Layout
@@ -78,6 +88,10 @@ HF_TOKEN_READ=<read token>
 HF_TOKEN_WRITE=<write token>
 GCP_PROJECT_ID=short-video-dataset-ocr
 FIRESTORE_COLLECTION=funnel_decisions
+FIRESTORE_CLAIMS_COLLECTION=funnel_claims
+FIRESTORE_TEXT_COLLECTION=text_frame_annotations
+CLAIM_TTL_MINUTES=30
+TEXT_CLAIM_TTL_MINUTES=60
 HF_VIDEO_MODE=url
 ```
 
