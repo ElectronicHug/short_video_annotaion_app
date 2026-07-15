@@ -227,6 +227,7 @@ def render_previous_text_tools(
     other_key: str,
     frame_key_value: str,
 ) -> None:
+    st.subheader("Попередній кадр")
     if not previous_annotation:
         st.caption("У цьому відео ще немає попередньої анотації.")
         return
@@ -237,9 +238,10 @@ def render_previous_text_tools(
         "Інше": (other_key, clean_text(previous_annotation.get("other_text"))),
     }
     for label, (target_key, value) in previous_values.items():
-        if not value:
-            continue
         st.caption(label)
+        if not value:
+            st.text(" ")
+            continue
         st.text(value)
         st.button(
             f"Скопіювати {label.lower()}",
@@ -249,14 +251,19 @@ def render_previous_text_tools(
             use_container_width=True,
         )
 
-    copy_all_values = {target_key: value for target_key, value in previous_values.values()}
-    st.button(
-        "Скопіювати все з попереднього",
-        key=f"copy_all::{frame_key_value}",
-        on_click=set_textarea_values,
-        args=(copy_all_values,),
-        use_container_width=True,
-    )
+    copy_all_values = {
+        target_key: value
+        for target_key, value in previous_values.values()
+        if value
+    }
+    if copy_all_values:
+        st.button(
+            "Скопіювати все з попереднього",
+            key=f"copy_all::{frame_key_value}",
+            on_click=set_textarea_values,
+            args=(copy_all_values,),
+            use_container_width=True,
+        )
 
 
 def previous_annotation_for_video(
@@ -425,7 +432,6 @@ def main() -> None:
             value=DEFAULT_FRAME_RENDER_WIDTH,
             step=40,
         )
-        show_previous_tools = st.toggle("Показати текст з попереднього кадру", value=False)
         with st.expander("Розширені дії", expanded=False):
             if st.button("Оновити дані HF/OCR", use_container_width=True):
                 load_text_rows.clear()
@@ -500,8 +506,8 @@ def main() -> None:
         f"Розмічено у відео: {video_done}/{len(video_rows)}"
     )
 
-    left_col, form_col = st.columns([1.35, 1.0], gap="large")
-    with left_col:
+    frame_col, form_col, previous_col = st.columns([1.55, 1.0, 0.9], gap="large")
+    with frame_col:
         render_frame(row, width=frame_render_width)
 
     with form_col:
@@ -540,15 +546,14 @@ def main() -> None:
             st.session_state.pop("text_current_frame_key", None)
             st.rerun()
 
-        if show_previous_tools:
-            with st.expander("Текст з попереднього кадру", expanded=False):
-                render_previous_text_tools(
-                    previous_annotation,
-                    subtitle_key=subtitle_key,
-                    static_key=static_key,
-                    other_key=other_key,
-                    frame_key_value=key,
-                )
+    with previous_col:
+        render_previous_text_tools(
+            previous_annotation,
+            subtitle_key=subtitle_key,
+            static_key=static_key,
+            other_key=other_key,
+            frame_key_value=key,
+        )
 
 if __name__ == "__main__":
     main()
