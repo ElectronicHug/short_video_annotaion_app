@@ -15,6 +15,7 @@ from .hf_tokens import get_config_value
 
 
 COOKIE_NAME = "short_video_ocr_auth"
+QUERY_AUTH_PARAM = "auth"
 COOKIE_DAYS = 1
 
 
@@ -104,7 +105,14 @@ def verify_token(token: str, secret: str) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
-def set_auth_cookie(user_id: str, users: dict[str, dict[str, str]]) -> None:
+def set_auth_cookie(user_id: str, users: dict[str, dict[str, str]], token: str | None = None) -> str:
+    expires_at, created_token = create_auth_token(user_id, users)
+    token = token or created_token
+    cookie_manager().set(COOKIE_NAME, token, expires_at=expires_at)
+    return token
+
+
+def create_auth_token(user_id: str, users: dict[str, dict[str, str]]) -> tuple[datetime, str]:
     expires_at = datetime.now(timezone.utc) + timedelta(days=COOKIE_DAYS)
     token = sign_payload(
         {
@@ -113,26 +121,46 @@ def set_auth_cookie(user_id: str, users: dict[str, dict[str, str]]) -> None:
         },
         auth_signing_secret(users),
     )
-    cookie_manager().set(COOKIE_NAME, token, expires_at=expires_at)
+    return expires_at, token
 
 
 def clear_auth_cookie() -> None:
     cookie_manager().delete(COOKIE_NAME)
 
 
+def query_auth_token() -> str:
+    try:
+        value = st.query_params.get(QUERY_AUTH_PARAM)
+    except Exception:
+        return ""
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value or "")
+
+
+def restore_auth_from_token(users: dict[str, dict[str, str]], token: str) -> bool:
+    if not token:
+        return False
+    payload = verify_token(str(token), auth_signing_secret(users))
+    if not payload:
+        return False
+    user_id = str(payload.get("user_id") or "")
+    if user_id in users:
+        st.session_state["auth_user_id"] = user_id
+        return True
+    return False
+
+
 def restore_auth_from_cookie(users: dict[str, dict[str, str]]) -> None:
     if st.session_state.get("auth_user_id") in users:
+        return
+    if restore_auth_from_token(users, query_auth_token()):
         return
     token = cookie_manager().get(COOKIE_NAME)
     if not token:
         return
-    payload = verify_token(str(token), auth_signing_secret(users))
-    if not payload:
+    if not restore_auth_from_token(users, str(token)):
         clear_auth_cookie()
-        return
-    user_id = str(payload.get("user_id") or "")
-    if user_id in users:
-        st.session_state["auth_user_id"] = user_id
 
 
 def current_user(users: dict[str, dict[str, str]] | None = None) -> dict[str, str] | None:
@@ -154,6 +182,10 @@ def current_user(users: dict[str, dict[str, str]] | None = None) -> dict[str, st
 def logout() -> None:
     st.session_state.pop("auth_user_id", None)
     clear_auth_cookie()
+    try:
+        st.query_params.pop(QUERY_AUTH_PARAM, None)
+    except Exception:
+        pass
 
 
 def require_login(*, form_key: str = "login_form") -> dict[str, str] | None:
@@ -173,7 +205,9 @@ def require_login(*, form_key: str = "login_form") -> dict[str, str] | None:
         expected = user["password"] if user else ""
         if user and hmac.compare_digest(password, expected):
             st.session_state["auth_user_id"] = login
-            set_auth_cookie(login, users)
+            _expires_at, token = create_auth_token(login, users)
+            set_auth_cookie(login, users, token=token)
+            st.query_params[QUERY_AUTH_PARAM] = token
             return {"id": login, **user}
         st.error("Неправильний логін або пароль")
     return None
