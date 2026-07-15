@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 import os
 import uuid
@@ -190,29 +189,10 @@ def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, l
                 st.warning(f"Some frames were not preloaded: {', '.join(failed[:3])}")
 
 
-@st.cache_data(show_spinner=False)
-def image_data_uri_cached(path: str, mtime_ns: int) -> str:
-    del mtime_ns
-    encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
-
-
-def image_data_uri(path: Path) -> str:
-    return image_data_uri_cached(str(path), path.stat().st_mtime_ns)
-
-
 def render_frame(row: dict[str, Any], *, compact: bool = False) -> None:
     image_path = download_frame(row)
-    css_class = "previous-frame" if compact else "current-frame"
-    st.markdown(
-        f"""
-        <div class="{css_class}">
-          <div class="frame-label">{row['frame_id']} | {row.get('timestamp_seconds')}s</div>
-          <img src="{image_data_uri(image_path)}" />
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.caption(f"{row['frame_id']} | {row.get('timestamp_seconds')}s")
+    st.image(str(image_path), use_container_width=True)
 
 
 def previous_annotation_for_video(
@@ -311,28 +291,6 @@ def main() -> None:
         """
         <style>
         .block-container { padding-top: 1rem; max-width: 1500px; }
-        .current-frame, .previous-frame {
-            border: 1px solid #d7dde5;
-            background: #f8fafc;
-            overflow: hidden;
-        }
-        .current-frame img {
-            display: block;
-            max-height: 68vh;
-            object-fit: contain;
-            width: 100%;
-        }
-        .previous-frame img {
-            display: block;
-            max-height: 30vh;
-            object-fit: contain;
-            width: 100%;
-        }
-        .frame-label {
-            color: #475569;
-            font-size: 0.85rem;
-            padding: 0.35rem 0.55rem;
-        }
         .ocr-box {
             border-left: 3px solid #2563eb;
             background: #f8fafc;
