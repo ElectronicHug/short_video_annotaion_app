@@ -5,3 +5,4 @@ google-cloud-firestore>=2.20.0
 google-auth>=2.35.0
 requests>=2.32.0
 extra-streamlit-components>=0.1.80
+Pillow>=10.4.0

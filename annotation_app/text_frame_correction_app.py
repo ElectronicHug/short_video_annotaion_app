@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 import streamlit as st
+from PIL import Image
 
 from annotation_app.common.auth import current_annotator_id, logout, require_login
 from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
@@ -21,10 +22,12 @@ ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
 TARGET_FUNNEL_CATEGORIES = {"matched", "title_matched"}
 DEFAULT_CLAIM_TTL_MINUTES = 60
 FRAME_CACHE_DIR = ROOT / ".cache" / "text_frames"
+FRAME_PREVIEW_CACHE_DIR = ROOT / ".cache" / "text_frame_previews"
 TEXT_ANNOTATIONS_CACHE_SECONDS = 60
 TEXT_CLAIMS_CACHE_SECONDS = 15
 FRAME_PRELOAD_AHEAD = 20
 FRAME_PRELOAD_WORKERS = 6
+DEFAULT_FRAME_RENDER_WIDTH = 600
 
 
 def now_iso() -> str:
@@ -169,6 +172,27 @@ def download_frame(row: dict[str, Any]) -> Path:
     return local_path
 
 
+def local_preview_path(row: dict[str, Any], width: int) -> Path:
+    frame_path = Path(str(row["frame_path"]))
+    return FRAME_PREVIEW_CACHE_DIR / f"w{width}" / frame_path.with_suffix(".jpg")
+
+
+def preview_frame_path(row: dict[str, Any], width: int) -> Path:
+    preview_path = local_preview_path(row, width)
+    if preview_path.exists():
+        return preview_path
+
+    source_path = download_frame(row)
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(source_path) as image:
+        image = image.convert("RGB")
+        if image.width > width:
+            height = max(1, round(image.height * (width / image.width)))
+            image = image.resize((width, height), Image.Resampling.LANCZOS)
+        image.save(preview_path, format="JPEG", quality=82, optimize=True)
+    return preview_path
+
+
 def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, limit: int = FRAME_PRELOAD_AHEAD) -> None:
     batch = video_rows[start_index : start_index + limit]
     missing = [row for row in batch if not local_frame_path(row).exists()]
@@ -189,10 +213,10 @@ def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, l
                 st.warning(f"Some frames were not preloaded: {', '.join(failed[:3])}")
 
 
-def render_frame(row: dict[str, Any], *, compact: bool = False) -> None:
-    image_path = download_frame(row)
+def render_frame(row: dict[str, Any], *, width: int) -> None:
+    image_path = preview_frame_path(row, width)
     st.caption(f"{row['frame_id']} | {row.get('timestamp_seconds')}s")
-    st.image(str(image_path), use_container_width=True)
+    st.image(str(image_path), width=width)
 
 
 def render_previous_text_tools(
@@ -358,15 +382,6 @@ def main() -> None:
         """
         <style>
         .block-container { padding-top: 1rem; max-width: 1500px; }
-        .ocr-box {
-            border-left: 3px solid #2563eb;
-            background: #f8fafc;
-            color: #111827;
-            font-size: 0.95rem;
-            margin-bottom: 0.75rem;
-            padding: 0.55rem 0.7rem;
-            white-space: pre-wrap;
-        }
         div.stButton > button { min-height: 2.7rem; font-weight: 650; }
         textarea { font-size: 1rem !important; }
         </style>
@@ -409,6 +424,13 @@ def main() -> None:
         st.caption(f"Annotated frames: {len(annotations)}")
         st.caption(f"Active video locks: {len(locked_ids)}")
         st.caption(f"Lock TTL: {claim_ttl_minutes} min")
+        frame_render_width = st.slider(
+            "Ширина кадру",
+            min_value=360,
+            max_value=900,
+            value=DEFAULT_FRAME_RENDER_WIDTH,
+            step=40,
+        )
         show_previous_tools = st.toggle("Показати текст з попереднього кадру", value=False)
         if st.button("Reload HF/OCR data", use_container_width=True):
             load_text_rows.clear()
@@ -485,10 +507,11 @@ def main() -> None:
 
     left_col, form_col = st.columns([1.35, 1.0], gap="large")
     with left_col:
-        render_frame(row)
+        render_frame(row, width=frame_render_width)
 
     with form_col:
-        st.markdown(f"<div class='ocr-box'>{row.get('ocr_text') or ' '}</div>", unsafe_allow_html=True)
+        st.caption("OCR")
+        st.text(row.get("ocr_text") or " ")
         if previous_annotation and clean_text(previous_annotation.get("static_text")):
             st.caption("Субтитри заповнені як OCR мінус статичний текст з попереднього кадру.")
         with st.form(f"text_frame_form::{key}"):
