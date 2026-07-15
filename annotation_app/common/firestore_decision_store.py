@@ -138,6 +138,28 @@ class FirestoreDecisionStore:
                 decisions[video_id] = decision
         return decisions
 
+    def load_funnel_decision_records(self, dataset_id: str) -> list[dict[str, Any]]:
+        query = (
+            self.collection.where("dataset_id", "==", dataset_id)
+            .where("task", "==", TASK)
+        )
+        records: list[dict[str, Any]] = []
+        for document in query.stream():
+            data = document.to_dict() or {}
+            decision = data.get("decision")
+            if not isinstance(decision, dict):
+                decision = {}
+            records.append(
+                {
+                    **data,
+                    "document_id": document.id,
+                    "category": data.get("category") or decision.get("category"),
+                    "annotator_id": data.get("annotator_id") or decision.get("annotator_id") or "unknown",
+                    "classified_at": data.get("classified_at") or decision.get("classified_at"),
+                }
+            )
+        return records
+
     def load_active_funnel_claims(self, dataset_id: str) -> dict[str, dict[str, Any]]:
         now = datetime.now(timezone.utc)
         query = (
@@ -243,6 +265,31 @@ class FirestoreDecisionStore:
             if isinstance(video_id, str) and isinstance(frame_id, str) and isinstance(annotation, dict):
                 annotations[f"{video_id}/{frame_id}"] = annotation
         return annotations
+
+    def load_text_frame_annotation_records(self, dataset_id: str) -> list[dict[str, Any]]:
+        query = (
+            self.text_collection.where("dataset_id", "==", dataset_id)
+            .where("task", "==", TEXT_TASK)
+        )
+        records: list[dict[str, Any]] = []
+        for document in query.stream():
+            data = document.to_dict() or {}
+            annotation = data.get("annotation")
+            if not isinstance(annotation, dict):
+                annotation = {}
+            records.append(
+                {
+                    **data,
+                    "document_id": document.id,
+                    "annotator_id": data.get("annotator_id") or annotation.get("annotator_id") or "unknown",
+                    "status": data.get("status") or annotation.get("status"),
+                    "annotated_at": data.get("annotated_at") or annotation.get("annotated_at"),
+                    "subtitle_text": annotation.get("subtitle_text", ""),
+                    "static_text": annotation.get("static_text", ""),
+                    "other_text": annotation.get("other_text", ""),
+                }
+            )
+        return records
 
     def upsert_text_frame_annotation(
         self,

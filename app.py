@@ -21,6 +21,7 @@ pg = st.navigation(
     [
         st.Page("pages/1_Funnel.py", title="Відбір відео"),
         st.Page("pages/2_Text_Frame_Correction.py", title="Виправлення тексту"),
+        st.Page("pages/3_Stats.py", title="Статистика"),
     ]
 )
 pg.run()

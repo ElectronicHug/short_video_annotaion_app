@@ -839,7 +839,7 @@ def main() -> None:
 
     render_metric_row(videos, state)
 
-    top_left, top_right = st.columns([1, 2])
+    top_left, top_back, top_right = st.columns([1, 1, 2])
     with top_left:
         if st.button("Вибрати відео", type="primary", use_container_width=True):
             state["current_video_id"] = None
@@ -847,6 +847,13 @@ def main() -> None:
                 st.session_state.pop("hf_current_video_id", None)
             else:
                 save_state(state)
+            st.rerun()
+    with top_back:
+        if st.button("Назад", use_container_width=True, disabled=not state.get("recent_history"), key="funnel_top_back"):
+            if hf_store is not None:
+                undo_hf_last(hf_store, decision_store, state, videos_by_id)
+            else:
+                undo_last(state, videos_by_id)
             st.rerun()
     with top_right:
         st.caption("Уже розмічені відео автоматично пропускаються.")

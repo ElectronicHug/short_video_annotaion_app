@@ -551,14 +551,9 @@ def main() -> None:
             st.session_state.pop("text_current_frame_key", None)
             st.rerun()
 
-        back_col, back5_col = st.columns(2)
-        back_clicked = back_col.button("Назад", use_container_width=True, disabled=index == 0)
-        back5_clicked = back5_col.button("Назад 5", use_container_width=True, disabled=index == 0)
+        back_clicked = st.button("Назад", use_container_width=True, disabled=index == 0)
         if back_clicked:
             go_to_frame_index(video_rows, index - 1)
-            st.rerun()
-        if back5_clicked:
-            go_to_frame_index(video_rows, index - 5)
             st.rerun()
 
     with previous_col:
