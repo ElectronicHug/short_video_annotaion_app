@@ -300,20 +300,17 @@ def require_login() -> dict[str, str] | None:
 
     st.subheader("Вхід")
     with st.form("login_form"):
-        selected_user = st.selectbox(
-            "Профіль",
-            options=list(users),
-            format_func=lambda user_id: users[user_id]["display_name"],
-        )
+        login = st.text_input("Логін").strip().lower()
         password = st.text_input("Пароль", type="password")
         submitted = st.form_submit_button("Увійти", type="primary", use_container_width=True)
 
     if submitted:
-        expected = users[selected_user]["password"]
-        if hmac.compare_digest(password, expected):
-            st.session_state["auth_user_id"] = selected_user
+        user = users.get(login)
+        expected = user["password"] if user else ""
+        if user and hmac.compare_digest(password, expected):
+            st.session_state["auth_user_id"] = login
             st.rerun()
-        st.error("Неправильний пароль")
+        st.error("Неправильний логін або пароль")
     return None
 
 
