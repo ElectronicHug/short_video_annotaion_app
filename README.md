@@ -93,7 +93,11 @@ FIRESTORE_TEXT_COLLECTION=text_frame_annotations
 CLAIM_TTL_MINUTES=30
 TEXT_CLAIM_TTL_MINUTES=60
 HF_VIDEO_MODE=url
+AUTH_COOKIE_SECRET=<random long string>
 ```
+
+`AUTH_COOKIE_SECRET` signs the 24-hour login cookie. It should be stable across
+app restarts and must stay in Streamlit secrets, not in git.
 
 For Streamlit Community Cloud, add the same values to app secrets. Prefer the
 `[gcp_service_account]` table shown below for Firestore writes. For local HF

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import base64
-import hmac
 import json
 import os
 import uuid
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,6 +11,7 @@ from typing import Any
 import requests
 import streamlit as st
 
+from annotation_app.common.auth import current_annotator_id, logout, require_login
 from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
 from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
 from annotation_app.common.hf_tokens import get_config_value
@@ -37,71 +36,6 @@ def clean_text(value: Any) -> str:
 
 def frame_key(video_id: str, frame_id: str) -> str:
     return f"{video_id}/{frame_id}"
-
-
-def streamlit_secret_value(name: str) -> Any:
-    try:
-        return st.secrets.get(name)
-    except Exception:
-        return None
-
-
-def load_auth_users() -> dict[str, dict[str, str]]:
-    raw_users = streamlit_secret_value("auth_users")
-    if not isinstance(raw_users, Mapping):
-        return {}
-
-    users: dict[str, dict[str, str]] = {}
-    for user_id, raw_profile in raw_users.items():
-        if isinstance(raw_profile, Mapping):
-            password = str(raw_profile.get("password", ""))
-            display_name = str(raw_profile.get("display_name", user_id))
-            role = str(raw_profile.get("role", "annotator"))
-        else:
-            password = str(raw_profile)
-            display_name = str(user_id)
-            role = "annotator"
-        if password:
-            users[str(user_id)] = {
-                "password": password,
-                "display_name": display_name,
-                "role": role,
-            }
-    return users
-
-
-def require_login() -> dict[str, str] | None:
-    users = load_auth_users()
-    if not users:
-        annotator_id = get_config_value("ANNOTATOR_ID", "default")
-        return {
-            "id": annotator_id,
-            "display_name": annotator_id,
-            "role": "local",
-        }
-
-    if st.session_state.get("auth_user_id") in users:
-        user_id = str(st.session_state["auth_user_id"])
-        return {"id": user_id, **users[user_id]}
-
-    st.subheader("Вхід")
-    with st.form("text_login_form"):
-        login = st.text_input("Логін").strip().lower()
-        password = st.text_input("Пароль", type="password")
-        submitted = st.form_submit_button("Увійти", type="primary", use_container_width=True)
-
-    if submitted:
-        user = users.get(login)
-        expected = user["password"] if user else ""
-        if user and hmac.compare_digest(password, expected):
-            st.session_state["auth_user_id"] = login
-            st.rerun()
-        st.error("Неправильний логін або пароль")
-    return None
-
-
-def current_annotator_id() -> str:
-    return str(st.session_state.get("auth_user_id") or get_config_value("ANNOTATOR_ID", "default"))
 
 
 def current_session_id() -> str:
@@ -370,7 +304,7 @@ def main() -> None:
         st.caption(f"Профіль: {active_user['display_name']}")
         st.caption(f"Роль: {active_user['role']}")
         if st.button("Вийти", use_container_width=True):
-            st.session_state.pop("auth_user_id", None)
+            logout()
             st.rerun()
         st.divider()
         st.caption(f"Videos: {len(grouped_rows)}")

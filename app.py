@@ -2,17 +2,25 @@ from __future__ import annotations
 
 import streamlit as st
 
+from annotation_app.common.auth import logout, require_login
 
-st.set_page_config(page_title="Short Video OCR Annotation", layout="wide")
 
 st.title("Short Video OCR Annotation")
-st.caption("Use the sidebar to choose an annotation stage.")
+active_user = require_login(form_key="app_login_form")
+if active_user is None:
+    st.stop()
 
-st.markdown(
-    """
-    ### Available stages
+with st.sidebar:
+    st.caption(f"Профіль: {active_user['display_name']}")
+    st.caption(f"Роль: {active_user['role']}")
+    if st.button("Вийти", use_container_width=True):
+        logout()
+        st.rerun()
 
-    - **Funnel**: classify videos by text/subtitle matching.
-    - **Text Frame Correction**: correct OCR text frame by frame for selected videos.
-    """
+pg = st.navigation(
+    [
+        st.Page("pages/1_Funnel.py", title="Funnel"),
+        st.Page("pages/2_Text_Frame_Correction.py", title="Text Frame Correction"),
+    ]
 )
+pg.run()
