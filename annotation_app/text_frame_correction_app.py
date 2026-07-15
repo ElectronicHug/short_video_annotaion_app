@@ -208,6 +208,33 @@ def previous_annotation_for_video(
     return None, None
 
 
+def remove_static_text_from_ocr(ocr_text: str, static_text: str) -> str:
+    ocr_text = clean_text(ocr_text)
+    static_text = clean_text(static_text)
+    if not ocr_text or not static_text:
+        return ocr_text
+
+    static_lines = {" ".join(line.split()).casefold() for line in static_text.splitlines() if line.strip()}
+    kept_lines = []
+    removed_any = False
+    for line in ocr_text.splitlines():
+        normalized_line = " ".join(line.split()).casefold()
+        if normalized_line and normalized_line in static_lines:
+            removed_any = True
+            continue
+        kept_lines.append(line)
+    if removed_any:
+        return "\n".join(line for line in kept_lines if line.strip()).strip()
+
+    compact_ocr = " ".join(ocr_text.split())
+    compact_static = " ".join(static_text.split())
+    index = compact_ocr.casefold().find(compact_static.casefold())
+    if index < 0:
+        return ocr_text
+    cleaned = (compact_ocr[:index] + compact_ocr[index + len(compact_static) :]).strip()
+    return " ".join(cleaned.split())
+
+
 def set_textarea_value(key: str, value: str) -> None:
     st.session_state[key] = value
 
@@ -403,8 +430,14 @@ def main() -> None:
     if active_key != key:
         st.session_state["active_text_frame_key"] = key
         existing = annotations.get(key, {})
-        st.session_state[subtitle_key] = existing.get("subtitle_text", row.get("ocr_text", ""))
-        st.session_state[static_key] = existing.get("static_text", "")
+        previous_static_text = clean_text((previous_annotation or {}).get("static_text"))
+        default_static_text = existing.get("static_text", previous_static_text)
+        default_subtitle_text = existing.get(
+            "subtitle_text",
+            remove_static_text_from_ocr(row.get("ocr_text", ""), previous_static_text),
+        )
+        st.session_state[subtitle_key] = default_subtitle_text
+        st.session_state[static_key] = default_static_text
         st.session_state[other_key] = existing.get("other_text", "")
 
     video_done = sum(1 for item in video_rows if frame_key(item["video_id"], item["frame_id"]) in annotations)
@@ -419,6 +452,8 @@ def main() -> None:
 
     with form_col:
         st.markdown(f"<div class='ocr-box'>{row.get('ocr_text') or ' '}</div>", unsafe_allow_html=True)
+        if previous_annotation and clean_text(previous_annotation.get("static_text")):
+            st.caption("Субтитри заповнені як OCR мінус статичний текст з попереднього кадру.")
         with st.form(f"text_frame_form::{key}"):
             subtitle_text = st.text_area("Субтитри", key=subtitle_key, height=150)
             static_text = st.text_area("Статичний текст", key=static_key, height=110)
