@@ -6,6 +6,7 @@ import random
 import re
 import sys
 import hmac
+import uuid
 from collections.abc import Mapping
 from concurrent.futures import TimeoutError
 from datetime import datetime, timezone
@@ -36,6 +37,7 @@ HF_DOWNLOAD_TIMEOUT_SECONDS = 20
 HF_VIDEO_MODE_DIRECT_URL = "url"
 HF_VIDEO_MODE_DOWNLOAD = "download"
 DEFAULT_VIDEO_WIDTH_PERCENT = 88
+DEFAULT_CLAIM_TTL_MINUTES = 30
 
 CATEGORIES = [
     {
@@ -225,6 +227,37 @@ def get_hf_video_mode() -> str:
     if mode in {HF_VIDEO_MODE_DIRECT_URL, HF_VIDEO_MODE_DOWNLOAD}:
         return mode
     return HF_VIDEO_MODE_DIRECT_URL
+
+
+def get_claim_ttl_minutes() -> int:
+    raw_value = get_config_value("CLAIM_TTL_MINUTES", str(DEFAULT_CLAIM_TTL_MINUTES))
+    try:
+        return max(1, int(raw_value))
+    except (TypeError, ValueError):
+        return DEFAULT_CLAIM_TTL_MINUTES
+
+
+def current_session_id() -> str:
+    session_id = st.session_state.get("annotation_session_id")
+    if not session_id:
+        session_id = uuid.uuid4().hex
+        st.session_state["annotation_session_id"] = session_id
+    return str(session_id)
+
+
+def is_own_claim(claim: dict[str, Any]) -> bool:
+    return (
+        str(claim.get("annotator_id") or "") == current_annotator_id()
+        or str(claim.get("session_id") or "") == current_session_id()
+    )
+
+
+def locked_video_ids(active_claims: dict[str, dict[str, Any]]) -> set[str]:
+    return {
+        video_id
+        for video_id, claim in active_claims.items()
+        if not is_own_claim(claim)
+    }
 
 
 def hf_video_url(store: HfDatasetStore, video: dict[str, Any]) -> str:
@@ -478,9 +511,15 @@ def select_next_video(
     *,
     randomize: bool,
     enrich: bool = True,
+    locked_ids: set[str] | None = None,
 ) -> dict[str, Any] | None:
     decided_ids = set(state.get("decisions", {}).keys())
-    candidates = [video for video in videos if video["video_id"] not in decided_ids]
+    locked_ids = locked_ids or set()
+    candidates = [
+        video
+        for video in videos
+        if video["video_id"] not in decided_ids and video["video_id"] not in locked_ids
+    ]
     if not candidates:
         return None
 
@@ -509,9 +548,15 @@ def select_prefetch_videos(
     current_video_id: str,
     *,
     limit: int,
+    locked_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     decided_ids = set(state.get("decisions", {}).keys())
-    candidates = [video for video in videos if video["video_id"] not in decided_ids]
+    locked_ids = locked_ids or set()
+    candidates = [
+        video
+        for video in videos
+        if video["video_id"] not in decided_ids and video["video_id"] not in locked_ids
+    ]
     if not candidates:
         return []
 
@@ -749,8 +794,11 @@ def main() -> None:
     storage_backend = get_storage_backend()
     decision_backend = get_decision_backend()
     hf_video_mode = get_hf_video_mode()
+    claim_ttl_minutes = get_claim_ttl_minutes()
     hf_store = None
     decision_store: FirestoreDecisionStore | None = None
+    active_claims: dict[str, dict[str, Any]] = {}
+    claim_locked_ids: set[str] = set()
     if storage_backend == "hf":
         hf_store = HfDatasetStore.from_config(root=ROOT)
         if decision_backend == "firestore":
@@ -764,9 +812,17 @@ def main() -> None:
         state = normalize_state(hf_store.load_funnel_state(default_hf_state()), dataset_id=DATASET_ID)
         if decision_store is not None:
             state.setdefault("decisions", {}).update(decision_store.load_funnel_decisions(DATASET_ID))
+            active_claims = decision_store.load_active_funnel_claims(DATASET_ID)
+            claim_locked_ids = locked_video_ids(active_claims)
         session_current_id = st.session_state.get("hf_current_video_id")
-        if session_current_id and session_current_id not in state.get("decisions", {}):
+        if (
+            session_current_id
+            and session_current_id not in state.get("decisions", {})
+            and session_current_id not in claim_locked_ids
+        ):
             state["current_video_id"] = session_current_id
+        elif session_current_id in claim_locked_ids:
+            st.session_state.pop("hf_current_video_id", None)
     else:
         videos = scan_raw_videos()
         videos_by_id = {video["video_id"]: video for video in videos}
@@ -784,6 +840,9 @@ def main() -> None:
             st.caption(f"Repo: {hf_store.repo_id}")
             st.caption(f"Decision log: {decision_backend}")
             st.caption(f"Video mode: {hf_video_mode}")
+            if decision_store is not None:
+                st.caption(f"Active locks: {len(claim_locked_ids)}")
+                st.caption(f"Lock TTL: {claim_ttl_minutes} min")
         else:
             st.caption(f"Source: {RAW_DATASET_DIR}")
             st.caption(f"Target: {DATASET_DIR}")
@@ -864,10 +923,30 @@ def main() -> None:
     with top_right:
         st.caption("Videos already classified are skipped automatically.")
 
-    video = select_next_video(videos, state, randomize=randomize, enrich=hf_store is None)
+    video = select_next_video(
+        videos,
+        state,
+        randomize=randomize,
+        enrich=hf_store is None,
+        locked_ids=claim_locked_ids,
+    )
     if video is None:
-        st.success("All available short videos are classified.")
+        st.success("All available short videos are classified or temporarily locked.")
         return
+
+    if hf_store is not None and decision_store is not None:
+        claim_result = decision_store.claim_funnel_video(
+            dataset_id=state.get("dataset_id") or DATASET_ID,
+            video_id=video["video_id"],
+            annotator_id=current_annotator_id(),
+            session_id=current_session_id(),
+            ttl_minutes=claim_ttl_minutes,
+        )
+        if not claim_result.get("claimed"):
+            state["current_video_id"] = None
+            st.session_state.pop("hf_current_video_id", None)
+            st.info("This video was just taken by another annotator. Choosing another one.")
+            st.rerun()
 
     if state.get("current_video_id") != video["video_id"]:
         if hf_store is not None:
@@ -949,6 +1028,7 @@ def main() -> None:
                 state,
                 video["video_id"],
                 limit=HF_PREFETCH_AHEAD,
+                locked_ids=claim_locked_ids,
             )
             if item["video_id"] not in futures and not hf_store.is_video_cached(item)
         ]
