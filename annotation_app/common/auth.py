@@ -17,6 +17,8 @@ from .hf_tokens import get_config_value
 COOKIE_NAME = "short_video_ocr_auth"
 QUERY_AUTH_PARAM = "auth"
 COOKIE_DAYS = 1
+AUTH_MODE_PASSWORD = "password"
+AUTH_MODE_PROFILE_ONLY = "profile_only"
 
 
 def streamlit_secret_value(name: str) -> Any:
@@ -31,6 +33,7 @@ def load_auth_users() -> dict[str, dict[str, str]]:
     if not isinstance(raw_users, Mapping):
         return {}
 
+    profile_only = auth_mode() == AUTH_MODE_PROFILE_ONLY
     users: dict[str, dict[str, str]] = {}
     for user_id, raw_profile in raw_users.items():
         if isinstance(raw_profile, Mapping):
@@ -41,13 +44,18 @@ def load_auth_users() -> dict[str, dict[str, str]]:
             password = str(raw_profile)
             display_name = str(user_id)
             role = "annotator"
-        if password:
+        if password or profile_only:
             users[str(user_id)] = {
                 "password": password,
                 "display_name": display_name,
                 "role": role,
             }
     return users
+
+
+def auth_mode() -> str:
+    raw_mode = str(get_config_value("AUTH_MODE", AUTH_MODE_PASSWORD) or AUTH_MODE_PASSWORD).strip().lower()
+    return AUTH_MODE_PROFILE_ONLY if raw_mode == AUTH_MODE_PROFILE_ONLY else AUTH_MODE_PASSWORD
 
 
 def current_annotator_id() -> str:
@@ -193,6 +201,30 @@ def require_login(*, form_key: str = "login_form") -> dict[str, str] | None:
     active_user = current_user(users)
     if active_user is not None:
         return active_user
+
+    if auth_mode() == AUTH_MODE_PROFILE_ONLY:
+        st.subheader("Оберіть профіль")
+        if not users:
+            st.error("Немає налаштованих профілів анотаторів.")
+            return None
+        options = sorted(users)
+        labels = {user_id: users[user_id]["display_name"] for user_id in options}
+        selected_user_id = st.selectbox(
+            "Профіль",
+            options=options,
+            format_func=lambda user_id: labels.get(user_id, user_id),
+            key=f"{form_key}_profile",
+            index=None,
+            placeholder="Оберіть свій профіль",
+        )
+        if st.button("Продовжити", type="primary", use_container_width=True, disabled=not selected_user_id):
+            login = str(selected_user_id)
+            st.session_state["auth_user_id"] = login
+            _expires_at, token = create_auth_token(login, users)
+            set_auth_cookie(login, users, token=token)
+            st.query_params[QUERY_AUTH_PARAM] = token
+            return {"id": login, **users[login]}
+        return None
 
     st.subheader("Вхід")
     with st.form(form_key):
