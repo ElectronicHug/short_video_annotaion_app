@@ -54,7 +54,11 @@ def current_annotator_id() -> str:
 
 
 def cookie_manager() -> stx.CookieManager:
-    return stx.CookieManager(key="short_video_ocr_cookie_manager")
+    manager = st.session_state.get("_short_video_ocr_cookie_manager")
+    if manager is None:
+        manager = stx.CookieManager(key="short_video_ocr_cookie_manager")
+        st.session_state["_short_video_ocr_cookie_manager"] = manager
+    return manager
 
 
 def auth_signing_secret(users: dict[str, dict[str, str]]) -> str:
