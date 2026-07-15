@@ -195,6 +195,46 @@ def render_frame(row: dict[str, Any], *, compact: bool = False) -> None:
     st.image(str(image_path), use_container_width=True)
 
 
+def render_previous_text_tools(
+    previous_annotation: dict[str, Any] | None,
+    *,
+    subtitle_key: str,
+    static_key: str,
+    other_key: str,
+    frame_key_value: str,
+) -> None:
+    if not previous_annotation:
+        st.caption("У цьому відео ще немає попередньої анотації.")
+        return
+
+    previous_values = {
+        "Субтитри": (subtitle_key, clean_text(previous_annotation.get("subtitle_text"))),
+        "Статичний текст": (static_key, clean_text(previous_annotation.get("static_text"))),
+        "Інше": (other_key, clean_text(previous_annotation.get("other_text"))),
+    }
+    for label, (target_key, value) in previous_values.items():
+        if not value:
+            continue
+        st.caption(label)
+        st.text(value)
+        st.button(
+            f"Скопіювати {label.lower()}",
+            key=f"copy::{target_key}::{frame_key_value}",
+            on_click=set_textarea_value,
+            args=(target_key, value),
+            use_container_width=True,
+        )
+
+    copy_all_values = {target_key: value for target_key, value in previous_values.values()}
+    st.button(
+        "Скопіювати все з попереднього",
+        key=f"copy_all::{frame_key_value}",
+        on_click=set_textarea_values,
+        args=(copy_all_values,),
+        use_container_width=True,
+    )
+
+
 def previous_annotation_for_video(
     video_rows: list[dict[str, Any]],
     annotations: dict[str, dict[str, Any]],
@@ -369,6 +409,7 @@ def main() -> None:
         st.caption(f"Annotated frames: {len(annotations)}")
         st.caption(f"Active video locks: {len(locked_ids)}")
         st.caption(f"Lock TTL: {claim_ttl_minutes} min")
+        show_previous_tools = st.toggle("Показати текст з попереднього кадру", value=False)
         if st.button("Reload HF/OCR data", use_container_width=True):
             load_text_rows.clear()
             st.session_state.pop("text_annotations_cache", None)
@@ -383,12 +424,8 @@ def main() -> None:
 
     total = len(rows)
     done = len(annotations)
-    metric_cols = st.columns(4)
-    metric_cols[0].metric("Annotated", done)
-    metric_cols[1].metric("Remaining", max(0, total - done))
-    metric_cols[2].metric("Frames", total)
-    metric_cols[3].metric("Videos", len(grouped_rows))
     if total:
+        st.caption(f"Annotated {done}/{total} frames | Remaining {max(0, total - done)}")
         st.progress(min(1.0, done / total))
 
     if video_id is None:
@@ -422,7 +459,7 @@ def main() -> None:
     key = frame_key(row["video_id"], row["frame_id"])
     st.session_state["text_current_frame_key"] = key
 
-    previous_row, previous_annotation = previous_annotation_for_video(video_rows, annotations, index)
+    _, previous_annotation = previous_annotation_for_video(video_rows, annotations, index)
     subtitle_key = f"text_subtitle::{key}"
     static_key = f"text_static::{key}"
     other_key = f"text_other::{key}"
@@ -446,7 +483,7 @@ def main() -> None:
         f"Annotated in video: {video_done}/{len(video_rows)}"
     )
 
-    left_col, form_col, prev_col = st.columns([1.3, 1.0, 0.9], gap="large")
+    left_col, form_col = st.columns([1.35, 1.0], gap="large")
     with left_col:
         render_frame(row)
 
@@ -485,41 +522,15 @@ def main() -> None:
             st.session_state.pop("text_current_frame_key", None)
             st.rerun()
 
-    with prev_col:
-        st.subheader("Попередній кадр")
-        if previous_row and previous_annotation:
-            render_frame(previous_row, compact=True)
-            for label, field, target_key in [
-                ("Субтитри", "subtitle_text", subtitle_key),
-                ("Статичний текст", "static_text", static_key),
-                ("Інше", "other_text", other_key),
-            ]:
-                value = clean_text(previous_annotation.get(field))
-                st.caption(label)
-                st.code(value or " ", language=None)
-                st.button(
-                    f"Скопіювати {label.lower()}",
-                    key=f"copy::{field}::{key}",
-                    disabled=not value,
-                    on_click=set_textarea_value,
-                    args=(target_key, value),
-                    use_container_width=True,
+        if show_previous_tools:
+            with st.expander("Текст з попереднього кадру", expanded=False):
+                render_previous_text_tools(
+                    previous_annotation,
+                    subtitle_key=subtitle_key,
+                    static_key=static_key,
+                    other_key=other_key,
+                    frame_key_value=key,
                 )
-            copy_all_values = {
-                subtitle_key: clean_text(previous_annotation.get("subtitle_text")),
-                static_key: clean_text(previous_annotation.get("static_text")),
-                other_key: clean_text(previous_annotation.get("other_text")),
-            }
-            st.button(
-                "Скопіювати все",
-                key=f"copy_all::{key}",
-                on_click=set_textarea_values,
-                args=(copy_all_values,),
-                use_container_width=True,
-            )
-        else:
-            st.caption("Немає попередньої анотації у цьому відео.")
-
 
 if __name__ == "__main__":
     main()
