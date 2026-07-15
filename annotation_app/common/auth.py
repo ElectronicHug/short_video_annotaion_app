@@ -53,9 +53,8 @@ def current_annotator_id() -> str:
     return str(st.session_state.get("auth_user_id") or get_config_value("ANNOTATOR_ID", "default"))
 
 
-@st.cache_resource(show_spinner=False)
 def cookie_manager() -> stx.CookieManager:
-    return stx.CookieManager()
+    return stx.CookieManager(key="short_video_ocr_cookie_manager")
 
 
 def auth_signing_secret(users: dict[str, dict[str, str]]) -> str:
