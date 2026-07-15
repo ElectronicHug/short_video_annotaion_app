@@ -51,7 +51,11 @@ def _is_active_claim(data: Mapping[str, Any], now: datetime) -> bool:
 def _service_account_info() -> dict[str, Any] | None:
     section_value = _streamlit_secret_value("gcp_service_account")
     if isinstance(section_value, Mapping):
-        return _mapping_to_dict(section_value)
+        info = _mapping_to_dict(section_value)
+        private_key = info.get("private_key")
+        if isinstance(private_key, str):
+            info["private_key"] = private_key.replace("\\n", "\n")
+        return info
 
     raw_value = _streamlit_secret_value("GCP_SERVICE_ACCOUNT_JSON") or get_config_value(
         "GCP_SERVICE_ACCOUNT_JSON"
@@ -59,17 +63,26 @@ def _service_account_info() -> dict[str, Any] | None:
     if not raw_value:
         return None
     if isinstance(raw_value, Mapping):
-        return _mapping_to_dict(raw_value)
+        info = _mapping_to_dict(raw_value)
+        private_key = info.get("private_key")
+        if isinstance(private_key, str):
+            info["private_key"] = private_key.replace("\\n", "\n")
+        return info
 
     text_value = str(raw_value).strip()
     try:
-        return json.loads(text_value)
+        info = json.loads(text_value)
     except json.JSONDecodeError as exc:
         raise ValueError(
             "GCP_SERVICE_ACCOUNT_JSON must be valid JSON. In Streamlit secrets, "
             "prefer a [gcp_service_account] table or use TOML literal triple quotes: "
             "GCP_SERVICE_ACCOUNT_JSON = '''{...}'''."
         ) from exc
+    if isinstance(info, dict):
+        private_key = info.get("private_key")
+        if isinstance(private_key, str):
+            info["private_key"] = private_key.replace("\\n", "\n")
+    return info
 
 
 class FirestoreDecisionStore:
