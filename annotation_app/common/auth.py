@@ -174,6 +174,6 @@ def require_login(*, form_key: str = "login_form") -> dict[str, str] | None:
         if user and hmac.compare_digest(password, expected):
             st.session_state["auth_user_id"] = login
             set_auth_cookie(login, users)
-            st.rerun()
+            return {"id": login, **user}
         st.error("Неправильний логін або пароль")
     return None

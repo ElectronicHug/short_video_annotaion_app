@@ -4,6 +4,7 @@ import base64
 import json
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ TARGET_FUNNEL_CATEGORIES = {"matched", "title_matched"}
 DEFAULT_CLAIM_TTL_MINUTES = 60
 FRAME_CACHE_DIR = ROOT / ".cache" / "text_frames"
 TEXT_ANNOTATIONS_CACHE_SECONDS = 60
+TEXT_CLAIMS_CACHE_SECONDS = 15
+FRAME_PRELOAD_AHEAD = 20
+FRAME_PRELOAD_WORKERS = 6
 
 
 def now_iso() -> str:
@@ -147,9 +151,13 @@ def next_frame_index(video_rows: list[dict[str, Any]], annotations: dict[str, di
     return None
 
 
-def download_frame(row: dict[str, Any]) -> Path:
+def local_frame_path(row: dict[str, Any]) -> Path:
     frame_path = Path(str(row["frame_path"]))
-    local_path = FRAME_CACHE_DIR / frame_path
+    return FRAME_CACHE_DIR / frame_path
+
+
+def download_frame(row: dict[str, Any]) -> Path:
+    local_path = local_frame_path(row)
     if local_path.exists():
         return local_path
     url = row.get("frame_gcs_url")
@@ -162,9 +170,35 @@ def download_frame(row: dict[str, Any]) -> Path:
     return local_path
 
 
-def image_data_uri(path: Path) -> str:
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, limit: int = FRAME_PRELOAD_AHEAD) -> None:
+    batch = video_rows[start_index : start_index + limit]
+    missing = [row for row in batch if not local_frame_path(row).exists()]
+    if not missing:
+        return
+
+    with st.spinner(f"Loading frames... {len(missing)}"):
+        with ThreadPoolExecutor(max_workers=FRAME_PRELOAD_WORKERS) as executor:
+            futures = {executor.submit(download_frame, row): row for row in missing}
+            failed = []
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except Exception as exc:
+                    row = futures[future]
+                    failed.append(f"{row.get('frame_id')}: {type(exc).__name__}")
+            if failed:
+                st.warning(f"Some frames were not preloaded: {', '.join(failed[:3])}")
+
+
+@st.cache_data(show_spinner=False)
+def image_data_uri_cached(path: str, mtime_ns: int) -> str:
+    del mtime_ns
+    encoded = base64.b64encode(Path(path).read_bytes()).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+
+def image_data_uri(path: Path) -> str:
+    return image_data_uri_cached(str(path), path.stat().st_mtime_ns)
 
 
 def render_frame(row: dict[str, Any], *, compact: bool = False) -> None:
@@ -220,6 +254,18 @@ def update_text_annotations_cache(key: str, annotation: dict[str, Any]) -> None:
     if isinstance(cache, dict):
         cache[key] = annotation
         st.session_state["text_annotations_cache_loaded_at"] = datetime.now(timezone.utc).timestamp()
+
+
+def load_text_claims_cached(store: FirestoreDecisionStore) -> dict[str, dict[str, Any]]:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cache = st.session_state.get("text_claims_cache")
+    cache_loaded_at = float(st.session_state.get("text_claims_cache_loaded_at") or 0)
+    if isinstance(cache, dict) and now_ts - cache_loaded_at < TEXT_CLAIMS_CACHE_SECONDS:
+        return cache
+    claims = store.load_active_text_video_claims(DATASET_ID)
+    st.session_state["text_claims_cache"] = claims
+    st.session_state["text_claims_cache_loaded_at"] = now_ts
+    return claims
 
 
 def save_annotation(
@@ -321,7 +367,7 @@ def main() -> None:
         return
 
     annotations = load_text_annotations_cached(decision_store)
-    active_claims = decision_store.load_active_text_video_claims(DATASET_ID)
+    active_claims = load_text_claims_cached(decision_store)
     locked_ids = locked_video_ids(active_claims)
     grouped_rows = group_by_video(rows)
     video_id = next_video_id(grouped_rows, annotations, locked_ids)
@@ -342,6 +388,8 @@ def main() -> None:
             load_text_rows.clear()
             st.session_state.pop("text_annotations_cache", None)
             st.session_state.pop("text_annotations_cache_loaded_at", None)
+            st.session_state.pop("text_claims_cache", None)
+            st.session_state.pop("text_claims_cache_loaded_at", None)
             st.rerun()
         if st.button("Choose next video", use_container_width=True):
             st.session_state.pop("text_current_video_id", None)
@@ -382,6 +430,8 @@ def main() -> None:
         st.session_state.pop("text_current_video_id", None)
         st.session_state.pop("text_current_frame_key", None)
         st.rerun()
+
+    preload_frame_batch(video_rows, index)
 
     row = video_rows[index]
     key = frame_key(row["video_id"], row["frame_id"])
