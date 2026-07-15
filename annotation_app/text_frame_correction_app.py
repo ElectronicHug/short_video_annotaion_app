@@ -513,7 +513,7 @@ def main() -> None:
         f"Розмічено у відео: {video_done}/{len(video_rows)}"
     )
 
-    frame_col, form_col, previous_col = st.columns([1.55, 1.0, 0.9], gap="large")
+    frame_col, form_col, previous_col = st.columns([1.45, 1.25, 0.85], gap="large")
     with frame_col:
         render_frame(row, width=frame_render_width)
 
@@ -523,9 +523,9 @@ def main() -> None:
         if previous_annotation and clean_text(previous_annotation.get("static_text")):
             st.caption("Субтитри заповнені як OCR мінус статичний текст з попереднього кадру.")
         with st.form(f"text_frame_form::{key}"):
-            subtitle_text = st.text_area("Субтитри", key=subtitle_key, height=150)
-            static_text = st.text_area("Статичний текст", key=static_key, height=110)
-            other_text = st.text_area("Інше", key=other_key, height=90)
+            subtitle_text = st.text_area("Субтитри", key=subtitle_key, height=225)
+            static_text = st.text_area("Статичний текст", key=static_key, height=220)
+            other_text = st.text_area("Інше", key=other_key, height=110)
             save_col, empty_col, back_col = st.columns([1.1, 1.0, 0.8])
             save_clicked = save_col.form_submit_button("Зберегти", type="primary", use_container_width=True)
             empty_clicked = empty_col.form_submit_button("Порожній кадр", use_container_width=True)
