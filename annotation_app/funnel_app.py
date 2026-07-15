@@ -41,32 +41,32 @@ DEFAULT_CLAIM_TTL_MINUTES = 30
 CATEGORIES = [
     {
         "id": "matched",
-        "label": "Matched",
+        "label": "Субтитри збігаються",
         "help": "На відео лише субтитри, які співпадають з тим, що говориться.",
     },
     {
         "id": "title_matched",
-        "label": "Title + Matched",
+        "label": "Статичний текст + субтитри",
         "help": "Є статичний текст, який не говориться, плюс субтитри співпадають з мовленням.",
     },
     {
         "id": "partially_matched",
-        "label": "Partly Matched",
+        "label": "Частково збігається",
         "help": "Частково збігаються: приблизно 80% або більше.",
     },
     {
         "id": "unmatched",
-        "label": "Unmatched",
+        "label": "Не збігається",
         "help": "Є текст, який не збігається взагалі або збігається менше ніж на 80%.",
     },
     {
         "id": "annotation_problem",
-        "label": "Annotation problem",
+        "label": "Проблема з розміткою",
         "help": "Технічна проблема або неможливо надійно розмітити.",
     },
     {
         "id": "ignore",
-        "label": "Ignore",
+        "label": "Ігнорувати",
         "help": "Немає субтитрів і статичного тексту.",
     },
 ]
@@ -653,17 +653,17 @@ def render_metric_row(videos: list[dict[str, Any]], state: dict[str, Any]) -> No
     done = len(decisions)
     remaining = max(0, total - done)
     cols = st.columns(4)
-    cols[0].metric("Classified", done)
-    cols[1].metric("Remaining", remaining)
-    cols[2].metric("Raw videos", total)
-    cols[3].metric("Max duration", f"{MAX_DURATION_SECONDS}s")
+    cols[0].metric("Розмічено", done)
+    cols[1].metric("Залишилось", remaining)
+    cols[2].metric("Відео", total)
+    cols[3].metric("Макс. тривалість", f"{MAX_DURATION_SECONDS}s")
 
     if total:
         st.progress(done / total)
 
 
 def main() -> None:
-    st.set_page_config(page_title="Data Annotation Funnel", layout="wide")
+    st.set_page_config(page_title="Відбір відео", layout="wide")
     st.markdown(
         """
         <style>
@@ -710,7 +710,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.title("Data Annotation Funnel")
+    st.title("Відбір відео для OCR")
     active_user = require_login()
     if active_user is None:
         return
@@ -770,33 +770,33 @@ def main() -> None:
             st.rerun()
         st.divider()
         if hf_store is not None:
-            st.caption("Backend: HF Dataset")
+            st.caption("Сховище: HF Dataset")
             st.caption(f"Repo: {hf_store.repo_id}")
-            st.caption(f"Decision log: {decision_backend}")
-            st.caption(f"Video mode: {hf_video_mode}")
+            st.caption(f"Журнал рішень: {decision_backend}")
+            st.caption(f"Режим відео: {hf_video_mode}")
             if decision_store is not None:
-                st.caption(f"Active locks: {len(claim_locked_ids)}")
-                st.caption(f"Lock TTL: {claim_ttl_minutes} min")
+                st.caption(f"Активні блокування: {len(claim_locked_ids)}")
+                st.caption(f"Час блокування: {claim_ttl_minutes} хв")
         else:
-            st.caption(f"Source: {RAW_DATASET_DIR}")
-            st.caption(f"Target: {DATASET_DIR}")
+            st.caption(f"Джерело: {RAW_DATASET_DIR}")
+            st.caption(f"Ціль: {DATASET_DIR}")
         video_width_percent = st.slider(
-            "Video width",
+            "Ширина відео",
             min_value=55,
             max_value=100,
             value=int(st.session_state.get("video_width_percent", DEFAULT_VIDEO_WIDTH_PERCENT)),
             step=5,
-            help="Adjust video size for this browser session.",
+            help="Налаштувати розмір відео для цієї сесії браузера.",
         )
         st.session_state["video_width_percent"] = video_width_percent
-        randomize = st.toggle("Random order", value=False)
-        rescan_label = "Reload HF manifest" if hf_store is not None else "Rescan raw_dataset"
+        randomize = st.toggle("Випадковий порядок", value=False)
+        rescan_label = "Оновити HF manifest" if hf_store is not None else "Пересканувати raw_dataset"
         if st.button(rescan_label, use_container_width=True):
             if hf_store is None:
                 scan_raw_videos.clear()
             st.rerun()
         if st.button(
-            "Back",
+            "Назад",
             use_container_width=True,
             disabled=not state.get("recent_history"),
         ):
@@ -805,27 +805,27 @@ def main() -> None:
             else:
                 undo_last(state, videos_by_id)
             st.rerun()
-        if st.button("Export indexes", use_container_width=True):
+        if st.button("Експортувати індекси", use_container_width=True):
             if hf_store is not None:
                 if decision_store is not None:
-                    st.info("Firestore decisions are synced to HF by the Cloud Run Job.")
+                    st.info("Рішення з Firestore синхронізуються в HF через Cloud Run Job.")
                 else:
                     write_hf_exports(hf_store, state, videos_by_id)
             else:
                 write_exports(state, videos_by_id)
-                st.success("Exported")
+                st.success("Експортовано")
 
         last_problem = st.session_state.get("last_download_problem")
         if isinstance(last_problem, dict):
             st.divider()
-            st.subheader("Last download problem")
-            st.caption(f"Video: {last_problem.get('video_id')}")
-            st.caption(f"Size: {last_problem.get('size')}")
-            st.caption(f"Reason: {last_problem.get('reason')}")
-            st.caption(f"Detail: {last_problem.get('detail')}")
+            st.subheader("Остання проблема із завантаженням")
+            st.caption(f"Відео: {last_problem.get('video_id')}")
+            st.caption(f"Розмір: {last_problem.get('size')}")
+            st.caption(f"Причина: {last_problem.get('reason')}")
+            st.caption(f"Деталі: {last_problem.get('detail')}")
 
         st.divider()
-        st.subheader("Buckets")
+        st.subheader("Категорії")
         counts = {category["id"]: 0 for category in CATEGORIES}
         decisions_for_counts = (
             current_manifest_decisions(state, videos_by_id)
@@ -840,14 +840,14 @@ def main() -> None:
             st.caption(f"{category['label']}: {counts[category['id']]}")
 
     if not videos:
-        st.error("No raw videos under 60 seconds were found.")
+        st.error("Не знайдено відео до 60 секунд.")
         return
 
     render_metric_row(videos, state)
 
     top_left, top_right = st.columns([1, 2])
     with top_left:
-        if st.button("Choose Video", type="primary", use_container_width=True):
+        if st.button("Вибрати відео", type="primary", use_container_width=True):
             state["current_video_id"] = None
             if hf_store is not None:
                 st.session_state.pop("hf_current_video_id", None)
@@ -855,7 +855,7 @@ def main() -> None:
                 save_state(state)
             st.rerun()
     with top_right:
-        st.caption("Videos already classified are skipped automatically.")
+        st.caption("Уже розмічені відео автоматично пропускаються.")
 
     video = select_next_video(
         videos,
@@ -865,7 +865,7 @@ def main() -> None:
         locked_ids=claim_locked_ids,
     )
     if video is None:
-        st.success("All available short videos are classified or temporarily locked.")
+        st.success("Усі доступні короткі відео вже розмічені або тимчасово заблоковані.")
         return
 
     if hf_store is not None and decision_store is not None:
@@ -879,7 +879,7 @@ def main() -> None:
         if not claim_result.get("claimed"):
             state["current_video_id"] = None
             st.session_state.pop("hf_current_video_id", None)
-            st.info("This video was just taken by another annotator. Choosing another one.")
+            st.info("Це відео щойно взяв інший анотатор. Вибираю інше.")
             st.rerun()
 
     if state.get("current_video_id") != video["video_id"]:
@@ -892,9 +892,9 @@ def main() -> None:
     if hf_store is not None and hf_video_mode == HF_VIDEO_MODE_DIRECT_URL:
         video_path, video_source = resolve_video_source(hf_store, video)
         st.sidebar.divider()
-        st.sidebar.subheader("HF Video")
-        st.sidebar.caption(f"Mode: direct URL ({video_source})")
-        st.sidebar.caption(f"Size: {describe_video_size(video)}")
+        st.sidebar.subheader("HF Відео")
+        st.sidebar.caption(f"Режим: прямий URL ({video_source})")
+        st.sidebar.caption(f"Розмір: {describe_video_size(video)}")
     elif hf_store is not None:
         current_cached = hf_store.is_video_cached(video)
         futures = hf_download_futures()
@@ -907,7 +907,7 @@ def main() -> None:
                     current_future = hf_store.download_video_async(video)
                     futures[video["video_id"]] = current_future
                 with st.spinner(
-                    f"Downloading video from HF Dataset... ({HF_DOWNLOAD_TIMEOUT_SECONDS}s timeout)"
+                    f"Завантажую відео з HF Dataset... (таймаут {HF_DOWNLOAD_TIMEOUT_SECONDS}s)"
                 ):
                     video_path = current_future.result(timeout=HF_DOWNLOAD_TIMEOUT_SECONDS)
                 futures.pop(video["video_id"], None)
@@ -932,7 +932,7 @@ def main() -> None:
                     "annotation_problem_seconds": HF_DOWNLOAD_TIMEOUT_SECONDS,
                 },
             )
-            st.warning("Video download took too long. Marked as annotation problem.")
+            st.warning("Відео завантажувалось занадто довго. Позначено як проблему з розміткою.")
             st.rerun()
         except Exception as exc:
             futures.pop(video["video_id"], None)
@@ -953,7 +953,7 @@ def main() -> None:
                     "annotation_problem_error_type": type(exc).__name__,
                 },
             )
-            st.warning("Video download failed. Marked as annotation problem.")
+            st.warning("Не вдалося завантажити відео. Позначено як проблему з розміткою.")
             st.rerun()
         prefetch_videos = [
             item
@@ -971,15 +971,15 @@ def main() -> None:
                 futures[item["video_id"]] = hf_store.download_video_async(item)
         st.sidebar.divider()
         st.sidebar.subheader("HF Cache")
-        st.sidebar.caption(f"Current video: {'cached' if current_cached else 'downloaded now'}")
-        st.sidebar.caption(f"Current size: {describe_video_size(video)}")
+        st.sidebar.caption(f"Поточне відео: {'у кеші' if current_cached else 'завантажено зараз'}")
+        st.sidebar.caption(f"Поточний розмір: {describe_video_size(video)}")
         video_source = "hf_download"
         if prefetch_videos:
-            st.sidebar.caption("Prefetch queued:")
+            st.sidebar.caption("Черга попереднього завантаження:")
             for item in prefetch_videos:
                 st.sidebar.caption(f"- {item['video_id']} ({describe_video_size(item)})")
         else:
-            st.sidebar.caption("Prefetch queue: already warm or empty")
+            st.sidebar.caption("Черга попереднього завантаження: вже прогріта або порожня")
     else:
         video_path = Path(video["video_path"])
         video_source = "local"
@@ -991,23 +991,23 @@ def main() -> None:
             if video_path and video_source != "source_link":
                 st.video(str(video_path))
             elif video_path:
-                st.warning("Direct video file is unavailable. Open the source link manually.")
-                st.link_button("Open Source URL", str(video_path))
+                st.warning("Прямий файл відео недоступний. Відкрий посилання на джерело вручну.")
+                st.link_button("Відкрити джерело", str(video_path))
             else:
-                st.error("No video URL is available for this item.")
+                st.error("Для цього елемента немає URL відео.")
         st.markdown(
             f"""
             <div class="meta-box">
               <strong>{video['video_id']}</strong><br>
-              Duration: {video['duration_seconds']:.1f}s<br>
-              Uploader: {video.get('uploader') or '-'}<br>
-              Title: {video.get('title') or '-'}
+              Тривалість: {video['duration_seconds']:.1f}s<br>
+              Автор: {video.get('uploader') or '-'}<br>
+              Назва: {video.get('title') or '-'}
             </div>
             """,
             unsafe_allow_html=True,
         )
         if video.get("webpage_url"):
-            st.link_button("Open Source URL", video["webpage_url"])
+            st.link_button("Відкрити джерело", video["webpage_url"])
 
     with action_col:
         st.subheader("Класифікація")
@@ -1029,7 +1029,7 @@ def main() -> None:
 
     updated_at = state.get("updated_at")
     if updated_at:
-        st.caption(f"Last saved: {updated_at}")
+        st.caption(f"Останнє збереження: {updated_at}")
 
 
 if __name__ == "__main__":

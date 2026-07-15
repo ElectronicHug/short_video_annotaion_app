@@ -199,7 +199,7 @@ def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, l
     if not missing:
         return
 
-    with st.spinner(f"Loading frames... {len(missing)}"):
+    with st.spinner(f"Завантажую кадри... {len(missing)}"):
         with ThreadPoolExecutor(max_workers=FRAME_PRELOAD_WORKERS) as executor:
             futures = {executor.submit(download_frame, row): row for row in missing}
             failed = []
@@ -210,7 +210,7 @@ def preload_frame_batch(video_rows: list[dict[str, Any]], start_index: int, *, l
                     row = futures[future]
                     failed.append(f"{row.get('frame_id')}: {type(exc).__name__}")
             if failed:
-                st.warning(f"Some frames were not preloaded: {', '.join(failed[:3])}")
+                st.warning(f"Не вдалося попередньо завантажити деякі кадри: {', '.join(failed[:3])}")
 
 
 def render_frame(row: dict[str, Any], *, width: int) -> None:
@@ -377,7 +377,7 @@ def save_annotation(
 
 
 def main() -> None:
-    st.set_page_config(page_title="Text Frame Correction", layout="wide")
+    st.set_page_config(page_title="Виправлення тексту", layout="wide")
     st.markdown(
         """
         <style>
@@ -388,7 +388,7 @@ def main() -> None:
         """,
         unsafe_allow_html=True,
     )
-    st.title("Text Frame Correction")
+    st.title("Виправлення тексту по кадрах")
     active_user = require_login()
     if active_user is None:
         return
@@ -399,11 +399,11 @@ def main() -> None:
     try:
         rows = load_text_rows()
     except Exception as exc:
-        st.error(f"Failed to load HF frame/OCR data: {type(exc).__name__}: {exc}")
+        st.error(f"Не вдалося завантажити кадри/OCR з HF: {type(exc).__name__}: {exc}")
         return
 
     if not rows:
-        st.warning("No frames found for matched/title_matched videos with Qwen OCR outputs.")
+        st.warning("Не знайдено кадрів для відео matched/title_matched з Qwen OCR.")
         return
 
     annotations = load_text_annotations_cached(decision_store)
@@ -419,11 +419,11 @@ def main() -> None:
             logout()
             st.rerun()
         st.divider()
-        st.caption(f"Videos: {len(grouped_rows)}")
-        st.caption(f"Frames: {len(rows)}")
-        st.caption(f"Annotated frames: {len(annotations)}")
-        st.caption(f"Active video locks: {len(locked_ids)}")
-        st.caption(f"Lock TTL: {claim_ttl_minutes} min")
+        st.caption(f"Відео: {len(grouped_rows)}")
+        st.caption(f"Кадри: {len(rows)}")
+        st.caption(f"Розмічені кадри: {len(annotations)}")
+        st.caption(f"Активні блокування відео: {len(locked_ids)}")
+        st.caption(f"Час блокування: {claim_ttl_minutes} хв")
         frame_render_width = st.slider(
             "Ширина кадру",
             min_value=360,
@@ -432,14 +432,14 @@ def main() -> None:
             step=40,
         )
         show_previous_tools = st.toggle("Показати текст з попереднього кадру", value=False)
-        if st.button("Reload HF/OCR data", use_container_width=True):
+        if st.button("Оновити дані HF/OCR", use_container_width=True):
             load_text_rows.clear()
             st.session_state.pop("text_annotations_cache", None)
             st.session_state.pop("text_annotations_cache_loaded_at", None)
             st.session_state.pop("text_claims_cache", None)
             st.session_state.pop("text_claims_cache_loaded_at", None)
             st.rerun()
-        if st.button("Choose next video", use_container_width=True):
+        if st.button("Вибрати наступне відео", use_container_width=True):
             st.session_state.pop("text_current_video_id", None)
             st.session_state.pop("text_current_frame_key", None)
             st.rerun()
@@ -447,11 +447,11 @@ def main() -> None:
     total = len(rows)
     done = len(annotations)
     if total:
-        st.caption(f"Annotated {done}/{total} frames | Remaining {max(0, total - done)}")
+        st.caption(f"Розмічено {done}/{total} кадрів | Залишилось {max(0, total - done)}")
         st.progress(min(1.0, done / total))
 
     if video_id is None:
-        st.success("All available videos are annotated or temporarily locked.")
+        st.success("Усі доступні відео вже розмічені або тимчасово заблоковані.")
         return
 
     claim_result = decision_store.claim_text_video(
@@ -462,7 +462,7 @@ def main() -> None:
         ttl_minutes=claim_ttl_minutes,
     )
     if not claim_result.get("claimed"):
-        st.info("This video was just taken by another annotator. Choosing another one.")
+        st.info("Це відео щойно взяв інший анотатор. Вибираю інше.")
         st.session_state.pop("text_current_video_id", None)
         st.session_state.pop("text_current_frame_key", None)
         st.rerun()
@@ -501,8 +501,8 @@ def main() -> None:
 
     video_done = sum(1 for item in video_rows if frame_key(item["video_id"], item["frame_id"]) in annotations)
     st.caption(
-        f"Video {video_id} | Frame {index + 1}/{len(video_rows)} | "
-        f"Annotated in video: {video_done}/{len(video_rows)}"
+        f"Відео {video_id} | Кадр {index + 1}/{len(video_rows)} | "
+        f"Розмічено у відео: {video_done}/{len(video_rows)}"
     )
 
     left_col, form_col = st.columns([1.35, 1.0], gap="large")
