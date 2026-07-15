@@ -153,6 +153,13 @@ def next_frame_index(video_rows: list[dict[str, Any]], annotations: dict[str, di
     return None
 
 
+def go_to_frame_index(video_rows: list[dict[str, Any]], index: int) -> None:
+    index = max(0, min(index, len(video_rows) - 1))
+    row = video_rows[index]
+    st.session_state["text_current_frame_key"] = frame_key(row["video_id"], row["frame_id"])
+    st.session_state.pop("active_text_frame_key", None)
+
+
 def local_frame_path(row: dict[str, Any]) -> Path:
     frame_path = Path(str(row["frame_path"]))
     return FRAME_CACHE_DIR / frame_path
@@ -519,9 +526,10 @@ def main() -> None:
             subtitle_text = st.text_area("Субтитри", key=subtitle_key, height=150)
             static_text = st.text_area("Статичний текст", key=static_key, height=110)
             other_text = st.text_area("Інше", key=other_key, height=90)
-            save_col, empty_col = st.columns(2)
+            save_col, empty_col, back_col = st.columns([1.1, 1.0, 0.8])
             save_clicked = save_col.form_submit_button("Зберегти", type="primary", use_container_width=True)
             empty_clicked = empty_col.form_submit_button("Порожній кадр", use_container_width=True)
+            back_clicked = back_col.form_submit_button("Назад", use_container_width=True, disabled=index == 0)
 
         if save_clicked:
             save_annotation(
@@ -544,6 +552,9 @@ def main() -> None:
                 status="empty",
             )
             st.session_state.pop("text_current_frame_key", None)
+            st.rerun()
+        if back_clicked:
+            go_to_frame_index(video_rows, index - 1)
             st.rerun()
 
     with previous_col:
