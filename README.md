@@ -8,6 +8,12 @@ This repository contains app code only. Videos, manifests, annotation state, and
 ElectronicHug/short_video_ocr_dataset
 ```
 
+For the fastest operational handoff, read:
+
+```text
+docs/agent_runbook.md
+```
+
 ## Streamlit Deployment
 
 Deploy this GitHub repo as one multipage Streamlit Community Cloud app:
@@ -21,6 +27,7 @@ Pages:
 ```text
 Funnel
 Text Frame Correction
+Stats
 ```
 
 Funnel categories:
