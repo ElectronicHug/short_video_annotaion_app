@@ -21,6 +21,7 @@ ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
 TARGET_FUNNEL_CATEGORIES = {"matched", "title_matched"}
 DEFAULT_CLAIM_TTL_MINUTES = 60
 FRAME_CACHE_DIR = ROOT / ".cache" / "text_frames"
+TEXT_ANNOTATIONS_CACHE_SECONDS = 60
 
 
 def now_iso() -> str:
@@ -197,6 +198,30 @@ def set_textarea_value(key: str, value: str) -> None:
     st.session_state[key] = value
 
 
+def set_textarea_values(values: dict[str, str]) -> None:
+    for key, value in values.items():
+        st.session_state[key] = value
+
+
+def load_text_annotations_cached(store: FirestoreDecisionStore) -> dict[str, dict[str, Any]]:
+    now_ts = datetime.now(timezone.utc).timestamp()
+    cache = st.session_state.get("text_annotations_cache")
+    cache_loaded_at = float(st.session_state.get("text_annotations_cache_loaded_at") or 0)
+    if isinstance(cache, dict) and now_ts - cache_loaded_at < TEXT_ANNOTATIONS_CACHE_SECONDS:
+        return cache
+    annotations = store.load_text_frame_annotations(DATASET_ID)
+    st.session_state["text_annotations_cache"] = annotations
+    st.session_state["text_annotations_cache_loaded_at"] = now_ts
+    return annotations
+
+
+def update_text_annotations_cache(key: str, annotation: dict[str, Any]) -> None:
+    cache = st.session_state.setdefault("text_annotations_cache", {})
+    if isinstance(cache, dict):
+        cache[key] = annotation
+        st.session_state["text_annotations_cache_loaded_at"] = datetime.now(timezone.utc).timestamp()
+
+
 def save_annotation(
     store: FirestoreDecisionStore,
     row: dict[str, Any],
@@ -231,6 +256,7 @@ def save_annotation(
         annotation=annotation,
         annotator_id=current_annotator_id(),
     )
+    update_text_annotations_cache(frame_key(row["video_id"], row["frame_id"]), annotation)
 
 
 def main() -> None:
@@ -294,7 +320,7 @@ def main() -> None:
         st.warning("No frames found for matched/title_matched videos with Qwen OCR outputs.")
         return
 
-    annotations = decision_store.load_text_frame_annotations(DATASET_ID)
+    annotations = load_text_annotations_cached(decision_store)
     active_claims = decision_store.load_active_text_video_claims(DATASET_ID)
     locked_ids = locked_video_ids(active_claims)
     grouped_rows = group_by_video(rows)
@@ -314,6 +340,8 @@ def main() -> None:
         st.caption(f"Lock TTL: {claim_ttl_minutes} min")
         if st.button("Reload HF/OCR data", use_container_width=True):
             load_text_rows.clear()
+            st.session_state.pop("text_annotations_cache", None)
+            st.session_state.pop("text_annotations_cache_loaded_at", None)
             st.rerun()
         if st.button("Choose next video", use_container_width=True):
             st.session_state.pop("text_current_video_id", None)
@@ -434,11 +462,18 @@ def main() -> None:
                     args=(target_key, value),
                     use_container_width=True,
                 )
-            if st.button("Скопіювати все", key=f"copy_all::{key}", use_container_width=True):
-                st.session_state[subtitle_key] = clean_text(previous_annotation.get("subtitle_text"))
-                st.session_state[static_key] = clean_text(previous_annotation.get("static_text"))
-                st.session_state[other_key] = clean_text(previous_annotation.get("other_text"))
-                st.rerun()
+            copy_all_values = {
+                subtitle_key: clean_text(previous_annotation.get("subtitle_text")),
+                static_key: clean_text(previous_annotation.get("static_text")),
+                other_key: clean_text(previous_annotation.get("other_text")),
+            }
+            st.button(
+                "Скопіювати все",
+                key=f"copy_all::{key}",
+                on_click=set_textarea_values,
+                args=(copy_all_values,),
+                use_container_width=True,
+            )
         else:
             st.caption("Немає попередньої анотації у цьому відео.")
 
