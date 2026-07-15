@@ -143,9 +143,7 @@ def next_frame_index(video_rows: list[dict[str, Any]], annotations: dict[str, di
     if current_key:
         for index, row in enumerate(video_rows):
             if frame_key(row["video_id"], row["frame_id"]) == current_key:
-                if current_key not in annotations:
-                    return index
-                break
+                return index
 
     for index, row in enumerate(video_rows):
         if frame_key(row["video_id"], row["frame_id"]) not in annotations:
@@ -526,10 +524,11 @@ def main() -> None:
             subtitle_text = st.text_area("Субтитри", key=subtitle_key, height=225)
             static_text = st.text_area("Статичний текст", key=static_key, height=220)
             other_text = st.text_area("Інше", key=other_key, height=110)
-            save_col, empty_col, back_col = st.columns([1.1, 1.0, 0.8])
+            save_col, empty_col, back_col, back5_col = st.columns([1.1, 1.0, 0.8, 0.8])
             save_clicked = save_col.form_submit_button("Зберегти", type="primary", use_container_width=True)
             empty_clicked = empty_col.form_submit_button("Порожній кадр", use_container_width=True)
             back_clicked = back_col.form_submit_button("Назад", use_container_width=True, disabled=index == 0)
+            back5_clicked = back5_col.form_submit_button("Назад 5", use_container_width=True, disabled=index == 0)
 
         if save_clicked:
             save_annotation(
@@ -555,6 +554,9 @@ def main() -> None:
             st.rerun()
         if back_clicked:
             go_to_frame_index(video_rows, index - 1)
+            st.rerun()
+        if back5_clicked:
+            go_to_frame_index(video_rows, index - 5)
             st.rerun()
 
     with previous_col:
