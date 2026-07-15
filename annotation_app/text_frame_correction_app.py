@@ -12,7 +12,7 @@ import requests
 import streamlit as st
 from PIL import Image
 
-from annotation_app.common.auth import current_annotator_id, logout, require_login
+from annotation_app.common.auth import current_annotator_id, require_login
 from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
 from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
 from annotation_app.common.hf_tokens import get_config_value
@@ -413,12 +413,6 @@ def main() -> None:
     video_id = next_video_id(grouped_rows, annotations, locked_ids)
 
     with st.sidebar:
-        st.caption(f"Профіль: {active_user['display_name']}")
-        st.caption(f"Роль: {active_user['role']}")
-        if st.button("Вийти", use_container_width=True):
-            logout()
-            st.rerun()
-        st.divider()
         st.caption(f"Відео: {len(grouped_rows)}")
         st.caption(f"Кадри: {len(rows)}")
         st.caption(f"Розмічені кадри: {len(annotations)}")
@@ -432,17 +426,18 @@ def main() -> None:
             step=40,
         )
         show_previous_tools = st.toggle("Показати текст з попереднього кадру", value=False)
-        if st.button("Оновити дані HF/OCR", use_container_width=True):
-            load_text_rows.clear()
-            st.session_state.pop("text_annotations_cache", None)
-            st.session_state.pop("text_annotations_cache_loaded_at", None)
-            st.session_state.pop("text_claims_cache", None)
-            st.session_state.pop("text_claims_cache_loaded_at", None)
-            st.rerun()
-        if st.button("Вибрати наступне відео", use_container_width=True):
-            st.session_state.pop("text_current_video_id", None)
-            st.session_state.pop("text_current_frame_key", None)
-            st.rerun()
+        with st.expander("Розширені дії", expanded=False):
+            if st.button("Оновити дані HF/OCR", use_container_width=True):
+                load_text_rows.clear()
+                st.session_state.pop("text_annotations_cache", None)
+                st.session_state.pop("text_annotations_cache_loaded_at", None)
+                st.session_state.pop("text_claims_cache", None)
+                st.session_state.pop("text_claims_cache_loaded_at", None)
+                st.rerun()
+            if st.button("Скинути поточне відео", use_container_width=True):
+                st.session_state.pop("text_current_video_id", None)
+                st.session_state.pop("text_current_frame_key", None)
+                st.rerun()
 
     total = len(rows)
     done = len(annotations)

@@ -18,7 +18,7 @@ ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from annotation_app.common.auth import current_annotator_id, logout, require_login
+from annotation_app.common.auth import current_annotator_id, require_login
 from annotation_app.common.firestore_decision_store import FirestoreDecisionStore
 from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
 from annotation_app.common.hf_tokens import get_config_value, get_storage_backend
@@ -763,12 +763,6 @@ def main() -> None:
         state = load_state()
 
     with st.sidebar:
-        st.caption(f"Профіль: {active_user['display_name']}")
-        st.caption(f"Роль: {active_user['role']}")
-        if st.button("Вийти", use_container_width=True):
-            logout()
-            st.rerun()
-        st.divider()
         if hf_store is not None:
             st.caption("Сховище: HF Dataset")
             st.caption(f"Repo: {hf_store.repo_id}")
