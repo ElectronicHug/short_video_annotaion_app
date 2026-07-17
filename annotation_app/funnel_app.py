@@ -30,7 +30,7 @@ STATE_PATH = ANNOTATIONS_DIR / "state.json"
 EXPORT_PATH = ANNOTATIONS_DIR / "export.jsonl"
 BUCKETS_DIR = DATASET_DIR / "buckets"
 MAX_DURATION_SECONDS = 60
-HISTORY_LIMIT = 2
+HISTORY_LIMIT = 5
 HF_PREFETCH_AHEAD = 2
 HF_DOWNLOAD_TIMEOUT_SECONDS = 20
 HF_VIDEO_MODE_DIRECT_URL = "url"
@@ -745,7 +745,7 @@ def main() -> None:
         videos_by_id = {video["video_id"]: video for video in videos}
         state = normalize_state(hf_store.load_funnel_state(default_hf_state()), dataset_id=DATASET_ID)
         if decision_store is not None:
-            state.setdefault("decisions", {}).update(decision_store.load_funnel_decisions(DATASET_ID))
+            state["decisions"] = decision_store.load_funnel_decisions(DATASET_ID)
             active_claims = decision_store.load_active_funnel_claims(DATASET_ID)
             claim_locked_ids = locked_video_ids(active_claims)
         session_current_id = st.session_state.get("hf_current_video_id")
