@@ -20,7 +20,7 @@ from annotation_app.common.hf_tokens import get_config_value
 
 ROOT = Path(os.getenv("APP_ROOT", Path(__file__).resolve().parents[1]))
 TARGET_FUNNEL_CATEGORIES = {"matched", "title_matched"}
-DEFAULT_CLAIM_TTL_MINUTES = 60
+DEFAULT_CLAIM_TTL_MINUTES = 20160
 FRAME_CACHE_DIR = ROOT / ".cache" / "text_frames"
 FRAME_PREVIEW_CACHE_DIR = ROOT / ".cache" / "text_frame_previews"
 TEXT_ANNOTATIONS_CACHE_SECONDS = 60

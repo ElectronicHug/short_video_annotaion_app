@@ -14,8 +14,10 @@ from .hf_tokens import get_config_value
 DEFAULT_COLLECTION = "funnel_decisions"
 DEFAULT_CLAIMS_COLLECTION = "funnel_claims"
 DEFAULT_TEXT_COLLECTION = "text_frame_annotations"
+DEFAULT_TRANSCRIPT_COLLECTION = "video_transcript_annotations"
 TASK = "funnel"
 TEXT_TASK = "text_frame_correction"
+TRANSCRIPT_TASK = "video_transcript_correction"
 
 
 def _streamlit_secret_value(name: str) -> Any:
@@ -93,6 +95,7 @@ class FirestoreDecisionStore:
         collection: str = DEFAULT_COLLECTION,
         claims_collection: str = DEFAULT_CLAIMS_COLLECTION,
         text_collection: str = DEFAULT_TEXT_COLLECTION,
+        transcript_collection: str = DEFAULT_TRANSCRIPT_COLLECTION,
         database: str | None = None,
     ) -> None:
         credentials = None
@@ -108,6 +111,7 @@ class FirestoreDecisionStore:
         self.collection = self.client.collection(collection)
         self.claims_collection = self.client.collection(claims_collection)
         self.text_collection = self.client.collection(text_collection)
+        self.transcript_collection = self.client.collection(transcript_collection)
 
     @classmethod
     def from_config(cls) -> "FirestoreDecisionStore":
@@ -117,6 +121,7 @@ class FirestoreDecisionStore:
             collection=get_config_value("FIRESTORE_COLLECTION", DEFAULT_COLLECTION),
             claims_collection=get_config_value("FIRESTORE_CLAIMS_COLLECTION", DEFAULT_CLAIMS_COLLECTION),
             text_collection=get_config_value("FIRESTORE_TEXT_COLLECTION", DEFAULT_TEXT_COLLECTION),
+            transcript_collection=get_config_value("FIRESTORE_TRANSCRIPT_COLLECTION", DEFAULT_TRANSCRIPT_COLLECTION),
             database=get_config_value("FIRESTORE_DATABASE"),
         )
 
@@ -379,3 +384,64 @@ class FirestoreDecisionStore:
     def delete_funnel_decision(self, *, dataset_id: str, video_id: str) -> None:
         self.collection.document(self.document_id(dataset_id, video_id)).delete()
         self.claims_collection.document(self.document_id(dataset_id, video_id)).delete()
+
+    def load_video_transcript_annotations(self, dataset_id: str) -> dict[str, dict[str, Any]]:
+        query = (
+            self.transcript_collection.where("dataset_id", "==", dataset_id)
+            .where("task", "==", TRANSCRIPT_TASK)
+        )
+        annotations: dict[str, dict[str, Any]] = {}
+        for document in query.stream():
+            data = document.to_dict() or {}
+            video_id = data.get("video_id")
+            annotation = data.get("annotation")
+            if isinstance(video_id, str) and isinstance(annotation, dict):
+                annotations[video_id] = annotation
+        return annotations
+
+    def load_video_transcript_annotation_records(self, dataset_id: str) -> list[dict[str, Any]]:
+        query = (
+            self.transcript_collection.where("dataset_id", "==", dataset_id)
+            .where("task", "==", TRANSCRIPT_TASK)
+        )
+        records: list[dict[str, Any]] = []
+        for document in query.stream():
+            data = document.to_dict() or {}
+            annotation = data.get("annotation")
+            if not isinstance(annotation, dict):
+                annotation = {}
+            records.append(
+                {
+                    **data,
+                    "document_id": document.id,
+                    "annotator_id": data.get("annotator_id") or annotation.get("annotator_id") or "unknown",
+                    "status": data.get("status") or annotation.get("status"),
+                    "annotated_at": data.get("annotated_at") or annotation.get("annotated_at"),
+                    "transcript_text": annotation.get("transcript_text", ""),
+                }
+            )
+        return records
+
+    def upsert_video_transcript_annotation(
+        self,
+        *,
+        dataset_id: str,
+        video_id: str,
+        annotation: dict[str, Any],
+        annotator_id: str = "default",
+    ) -> None:
+        document_id = f"{dataset_id}__{TRANSCRIPT_TASK}__{video_id}"
+        self.transcript_collection.document(document_id).set(
+            {
+                "dataset_id": dataset_id,
+                "task": TRANSCRIPT_TASK,
+                "video_id": video_id,
+                "annotator_id": annotator_id,
+                "annotation": annotation,
+                "status": annotation.get("status"),
+                "annotated_at": annotation.get("annotated_at"),
+                "updated_at": firestore.SERVER_TIMESTAMP,
+                "synced_to_hf_at": None,
+            },
+            merge=True,
+        )

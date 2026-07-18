@@ -22,6 +22,10 @@ TEXT_FRAME_CORRECTIONS_PATH = "annotations/text_frame_corrections.jsonl"
 TEXT_VIDEO_STATE_PATH = "annotations/text_video_state.json"
 FRAMES_MANIFEST_PATH = "frames_manifest.jsonl"
 QWEN_FRAME_OCR_PATH = "ocr_predictions/qwen2_vl_2b_frame_ocr/qwen2_vl_2b_frame_ocr.jsonl"
+MANUAL_SUBTITLE_TRANSCRIPT_DRAFTS_PATH = "transcripts/manual_frame_subtitle_transcript_drafts.jsonl"
+OCR_LLM_TRANSCRIPTS_PATH = "transcripts/ocr_llm_transcripts.jsonl"
+CORRECTED_TRANSCRIPTS_PATH = "transcripts/corrected_transcripts.jsonl"
+TRANSCRIPT_VIDEO_STATE_PATH = "transcripts/transcript_video_state.json"
 PREFETCH_WORKERS = 4
 
 
@@ -49,13 +53,14 @@ class HfDatasetStore:
             cache_dir=root / ".cache" / "hf_dataset",
         )
 
-    def _download(self, path_in_repo: str) -> Path:
+    def _download(self, path_in_repo: str, *, force_download: bool = False) -> Path:
         local_path = hf_hub_download(
             repo_id=self.repo_id,
             filename=path_in_repo,
             repo_type="dataset",
             token=self.read_token or None,
             cache_dir=str(self.cache_dir),
+            force_download=force_download,
         )
         return Path(local_path)
 
@@ -86,6 +91,50 @@ class HfDatasetStore:
     def load_qwen_frame_ocr(self) -> list[dict[str, Any]]:
         try:
             path = self._download(QWEN_FRAME_OCR_PATH)
+        except EntryNotFoundError:
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
+
+    def load_text_frame_corrections(self) -> list[dict[str, Any]]:
+        try:
+            path = self._download(TEXT_FRAME_CORRECTIONS_PATH, force_download=True)
+        except EntryNotFoundError:
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
+
+    def load_manual_subtitle_transcript_drafts(self) -> list[dict[str, Any]]:
+        try:
+            path = self._download(MANUAL_SUBTITLE_TRANSCRIPT_DRAFTS_PATH, force_download=True)
+        except EntryNotFoundError:
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
+
+    def load_ocr_llm_transcripts(self) -> list[dict[str, Any]]:
+        try:
+            path = self._download(OCR_LLM_TRANSCRIPTS_PATH, force_download=True)
+        except EntryNotFoundError:
+            return []
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rows.append(json.loads(line))
+        return rows
+
+    def load_corrected_transcripts(self) -> list[dict[str, Any]]:
+        try:
+            path = self._download(CORRECTED_TRANSCRIPTS_PATH, force_download=True)
         except EntryNotFoundError:
             return []
         rows = []
