@@ -103,6 +103,61 @@ def decision_sort_key(decision: dict[str, Any]) -> str:
     return str(decision.get("classified_at") or "")
 
 
+def remember_undo_context(video_id: str, item: dict[str, Any], previous_decision: dict[str, Any] | None) -> None:
+    category_id = item.get("category") or (previous_decision or {}).get("category")
+    context = {
+        "video_id": video_id,
+        "category": category_id,
+        "category_label": item.get("category_label") or category_label(category_id),
+        "classified_at": item.get("classified_at") or (previous_decision or {}).get("classified_at"),
+        "title": item.get("title") or (previous_decision or {}).get("title") or "",
+    }
+    contexts = st.session_state.setdefault("funnel_undo_context_by_video", {})
+    if not isinstance(contexts, dict):
+        contexts = {}
+    contexts[video_id] = context
+    order = st.session_state.setdefault("funnel_undo_context_order", [])
+    if not isinstance(order, list):
+        order = []
+    order = [item_video_id for item_video_id in order if item_video_id != video_id]
+    order.insert(0, video_id)
+    order = order[:HISTORY_LIMIT]
+    contexts = {item_video_id: contexts[item_video_id] for item_video_id in order if item_video_id in contexts}
+    st.session_state["funnel_undo_context_by_video"] = contexts
+    st.session_state["funnel_undo_context_order"] = order
+
+
+def undo_context_for(video_id: str) -> dict[str, Any] | None:
+    contexts = st.session_state.get("funnel_undo_context_by_video")
+    if not isinstance(contexts, dict):
+        return None
+    context = contexts.get(video_id)
+    return context if isinstance(context, dict) else None
+
+
+def clear_undo_context(video_id: str) -> None:
+    contexts = st.session_state.get("funnel_undo_context_by_video")
+    if isinstance(contexts, dict):
+        contexts.pop(video_id, None)
+    order = st.session_state.get("funnel_undo_context_order")
+    if isinstance(order, list):
+        st.session_state["funnel_undo_context_order"] = [
+            item_video_id for item_video_id in order if item_video_id != video_id
+        ]
+
+
+def recent_undo_contexts() -> list[dict[str, Any]]:
+    contexts = st.session_state.get("funnel_undo_context_by_video")
+    order = st.session_state.get("funnel_undo_context_order")
+    if not isinstance(contexts, dict) or not isinstance(order, list):
+        return []
+    return [
+        contexts[video_id]
+        for video_id in order[:HISTORY_LIMIT]
+        if isinstance(contexts.get(video_id), dict)
+    ]
+
+
 def read_json(path: Path, default: Any | None = None) -> Any:
     if not path.exists():
         return default
@@ -581,6 +636,7 @@ def classify_video(
     videos_by_id: dict[str, dict[str, Any]],
 ) -> None:
     video_id = video["video_id"]
+    clear_undo_context(video_id)
     previous_decision = state.get("decisions", {}).get(video_id)
     state.setdefault("decisions", {})[video_id] = {
         "category": category_id,
@@ -621,6 +677,7 @@ def classify_hf_video(
     extra_fields: dict[str, Any] | None = None,
 ) -> None:
     video_id = video["video_id"]
+    clear_undo_context(video_id)
     previous_decision = state.get("decisions", {}).get(video_id)
     decision = {
         "category": category_id,
@@ -748,12 +805,7 @@ def undo_saved_decision(
         st.session_state["funnel_skipped_video_ids"] = [
             skipped_id for skipped_id in skipped_ids if skipped_id != video_id
         ]
-    st.session_state["funnel_last_undo"] = {
-        "video_id": video_id,
-        "category": item.get("category") or (previous_decision or {}).get("category"),
-        "category_label": item.get("category_label") or category_label((previous_decision or {}).get("category")),
-        "classified_at": item.get("classified_at") or (previous_decision or {}).get("classified_at"),
-    }
+    remember_undo_context(video_id, item, previous_decision)
 
     if decision_store is not None:
         decision_store.delete_funnel_decision(
@@ -1103,9 +1155,12 @@ def main() -> None:
             annotator_id=active_annotator_id,
             limit=HISTORY_LIMIT,
         )
-        last_undo = st.session_state.get("funnel_last_undo")
-        if isinstance(last_undo, dict) and last_undo.get("video_id") == video.get("video_id"):
-            st.info(f"Повернено відео. Старий клас: {last_undo.get('category_label') or last_undo.get('category') or '-'}")
+        undo_context = undo_context_for(str(video.get("video_id") or ""))
+        if undo_context:
+            st.info(
+                "Повернено відео. Старий клас: "
+                f"{undo_context.get('category_label') or undo_context.get('category') or '-'}"
+            )
         for category in [category for category in CATEGORIES if category["id"] != "problem"]:
             button_col, help_col = st.columns([0.82, 2.05], gap="medium")
             with button_col:
@@ -1157,6 +1212,15 @@ def main() -> None:
                 for index, item in enumerate(recent_decisions, start=1):
                     st.caption(
                         f"{index}. {item['video_id']} — {item['category_label']} — "
+                        f"{item.get('classified_at') or '-'}"
+                    )
+        undone_items = recent_undo_contexts()
+        if undone_items:
+            with st.expander("Останні повернені відео", expanded=False):
+                for index, item in enumerate(undone_items, start=1):
+                    st.caption(
+                        f"{index}. {item['video_id']} — старий клас: "
+                        f"{item.get('category_label') or item.get('category') or '-'} — "
                         f"{item.get('classified_at') or '-'}"
                     )
         if st.button("Назад", use_container_width=True, disabled=not latest_decision, key="funnel_bottom_back"):
