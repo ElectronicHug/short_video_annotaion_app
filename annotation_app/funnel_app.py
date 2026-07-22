@@ -712,7 +712,7 @@ def main() -> None:
         .block-container {
             padding-top: 1rem;
             padding-bottom: 1rem;
-            max-width: 1400px;
+            max-width: 1680px;
         }
         div[data-testid="stVideo"] {
             border: 1px solid #d7dde5;
@@ -729,7 +729,7 @@ def main() -> None:
         .decision-help {
             color: #64748b;
             font-size: 0.88rem;
-            line-height: 1.32;
+            line-height: 1.35;
             min-height: 3.3rem;
             padding-top: 0.15rem;
         }
@@ -744,32 +744,13 @@ def main() -> None:
             margin-top: 1rem;
             padding-top: 0.75rem;
         }
-        .glossary-box {
-            border-left: 3px solid #2563eb;
-            color: #334155;
-            font-size: 0.92rem;
-            line-height: 1.45;
-            margin: 0.5rem 0 1rem;
-            padding: 0.25rem 0 0.25rem 0.8rem;
-        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.title("Відбір відео для OCR")
     active_user = require_login()
     if active_user is None:
         return
-    st.markdown(
-        """
-        <div class="glossary-box">
-          <strong>Субтитри</strong> - написано те, що говориться.<br>
-          <strong>Статичний текст</strong> - текст присутній, але не озвучений.<br>
-          <strong>Текст</strong> = субтитри + статичний текст.
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     storage_backend = get_storage_backend()
     decision_backend = get_decision_backend()
@@ -835,16 +816,6 @@ def main() -> None:
             if hf_store is None:
                 scan_raw_videos.clear()
             st.rerun()
-        if st.button(
-            "Назад",
-            use_container_width=True,
-            disabled=not state.get("recent_history"),
-        ):
-            if hf_store is not None:
-                undo_hf_last(hf_store, decision_store, state, videos_by_id)
-            else:
-                undo_last(state, videos_by_id)
-            st.rerun()
         if st.button("Експортувати індекси", use_container_width=True):
             if hf_store is not None:
                 if decision_store is not None:
@@ -882,27 +853,6 @@ def main() -> None:
     if not videos:
         st.error("Не знайдено відео до 60 секунд.")
         return
-
-    render_metric_row(videos, state)
-
-    top_left, top_back, top_right = st.columns([1, 1, 2])
-    with top_left:
-        if st.button("Вибрати відео", type="primary", use_container_width=True):
-            state["current_video_id"] = None
-            if hf_store is not None:
-                st.session_state.pop("hf_current_video_id", None)
-            else:
-                save_state(state)
-            st.rerun()
-    with top_back:
-        if st.button("Назад", use_container_width=True, disabled=not state.get("recent_history"), key="funnel_top_back"):
-            if hf_store is not None:
-                undo_hf_last(hf_store, decision_store, state, videos_by_id)
-            else:
-                undo_last(state, videos_by_id)
-            st.rerun()
-    with top_right:
-        st.caption("Уже розмічені відео автоматично пропускаються.")
 
     skipped_video_ids = set(st.session_state.get("funnel_skipped_video_ids", []))
     video = select_next_video(
@@ -1033,7 +983,7 @@ def main() -> None:
     else:
         video_path = Path(video["video_path"])
         video_source = "local"
-    main_col, action_col = st.columns([1.9, 1], gap="large")
+    main_col, action_col = st.columns([1.45, 1.15], gap="large")
 
     with main_col:
         video_left, video_center, video_right = st.columns(video_column_weights(video_width_percent))
@@ -1062,7 +1012,7 @@ def main() -> None:
     with action_col:
         st.subheader("Класифікація")
         for category in [category for category in CATEGORIES if category["id"] != "problem"]:
-            button_col, help_col = st.columns([0.72, 1.55], gap="medium")
+            button_col, help_col = st.columns([0.82, 2.05], gap="medium")
             with button_col:
                 clicked = st.button(category["label"], use_container_width=True, key=f"funnel_category_{category['id']}")
             with help_col:
@@ -1079,7 +1029,7 @@ def main() -> None:
             st.markdown("<div class='decision-separator'></div>", unsafe_allow_html=True)
         st.divider()
         problem_category = CATEGORY_BY_ID["problem"]
-        problem_col, problem_help_col = st.columns([0.72, 1.55], gap="medium")
+        problem_col, problem_help_col = st.columns([0.82, 2.05], gap="medium")
         with problem_col:
             problem_clicked = st.button(
                 problem_category["label"],
@@ -1100,6 +1050,12 @@ def main() -> None:
         st.markdown("<div class='decision-separator'></div>", unsafe_allow_html=True)
         if st.button("Наступне відео", use_container_width=True, key="funnel_skip_video"):
             skip_current_video(decision_store, state, video)
+            st.rerun()
+        if st.button("Назад", use_container_width=True, disabled=not state.get("recent_history"), key="funnel_bottom_back"):
+            if hf_store is not None:
+                undo_hf_last(hf_store, decision_store, state, videos_by_id)
+            else:
+                undo_last(state, videos_by_id)
             st.rerun()
 
     updated_at = state.get("updated_at")
