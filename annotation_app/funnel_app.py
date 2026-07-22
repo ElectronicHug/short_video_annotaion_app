@@ -729,9 +729,13 @@ def main() -> None:
         .decision-help {
             color: #64748b;
             font-size: 0.88rem;
-            line-height: 1.25;
+            line-height: 1.32;
             min-height: 3.3rem;
             padding-top: 0.15rem;
+        }
+        .decision-separator {
+            border-top: 1px solid #e5e7eb;
+            margin: 0.45rem 0 0.7rem;
         }
         .meta-box {
             border-top: 1px solid #e5e7eb;
@@ -1058,7 +1062,7 @@ def main() -> None:
     with action_col:
         st.subheader("Класифікація")
         for category in [category for category in CATEGORIES if category["id"] != "problem"]:
-            button_col, help_col = st.columns([0.9, 1.25], gap="small")
+            button_col, help_col = st.columns([0.72, 1.55], gap="medium")
             with button_col:
                 clicked = st.button(category["label"], use_container_width=True, key=f"funnel_category_{category['id']}")
             with help_col:
@@ -1072,9 +1076,10 @@ def main() -> None:
                 else:
                     classify_video(state, video, category["id"], videos_by_id)
                 st.rerun()
+            st.markdown("<div class='decision-separator'></div>", unsafe_allow_html=True)
         st.divider()
         problem_category = CATEGORY_BY_ID["problem"]
-        problem_col, problem_help_col = st.columns([0.9, 1.25], gap="small")
+        problem_col, problem_help_col = st.columns([0.72, 1.55], gap="medium")
         with problem_col:
             problem_clicked = st.button(
                 problem_category["label"],
@@ -1092,6 +1097,7 @@ def main() -> None:
             else:
                 classify_video(state, video, "problem", videos_by_id)
             st.rerun()
+        st.markdown("<div class='decision-separator'></div>", unsafe_allow_html=True)
         if st.button("Наступне відео", use_container_width=True, key="funnel_skip_video"):
             skip_current_video(decision_store, state, video)
             st.rerun()
