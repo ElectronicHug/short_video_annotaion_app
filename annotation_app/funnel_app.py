@@ -81,10 +81,26 @@ CATEGORIES = [
     },
 ]
 CATEGORY_BY_ID = {category["id"]: category for category in CATEGORIES}
+LEGACY_CATEGORY_LABELS = {
+    "unmatched": "Legacy: Не збігається",
+    "ignore": "Legacy: Ігнорувати",
+    "annotation_problem": "Legacy: Проблема",
+    "partly_matched": "Legacy: Частково збігається",
+}
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def category_label(category_id: str | None) -> str:
+    if not category_id:
+        return "-"
+    return CATEGORY_BY_ID.get(category_id, {}).get("label") or LEGACY_CATEGORY_LABELS.get(category_id, category_id)
+
+
+def decision_sort_key(decision: dict[str, Any]) -> str:
+    return str(decision.get("classified_at") or "")
 
 
 def read_json(path: Path, default: Any | None = None) -> Any:
@@ -379,6 +395,35 @@ def current_manifest_decisions(
         for video_id, decision in decisions.items()
         if video_id in videos_by_id and isinstance(decision, dict)
     }
+
+
+def recent_annotator_decisions(
+    state: dict[str, Any],
+    videos_by_id: dict[str, dict[str, Any]],
+    *,
+    annotator_id: str,
+    limit: int = HISTORY_LIMIT,
+) -> list[dict[str, Any]]:
+    decisions = current_manifest_decisions(state, videos_by_id)
+    rows: list[dict[str, Any]] = []
+    for video_id, decision in decisions.items():
+        if str(decision.get("annotator_id") or "") != annotator_id:
+            continue
+        video = videos_by_id.get(video_id, {})
+        category_id = str(decision.get("category") or "")
+        rows.append(
+            {
+                "video_id": video_id,
+                "category": category_id,
+                "category_label": category_label(category_id),
+                "classified_at": decision.get("classified_at") or "",
+                "title": decision.get("title") or video.get("title") or "",
+                "uploader": decision.get("uploader") or video.get("uploader") or "",
+                "duration_seconds": decision.get("duration_seconds") or video.get("duration_seconds"),
+            }
+        )
+    rows.sort(key=decision_sort_key, reverse=True)
+    return rows[:limit]
 
 
 def save_state(state: dict[str, Any]) -> None:
@@ -680,6 +725,46 @@ def undo_hf_last(
     st.session_state["hf_current_video_id"] = video_id
     if decision_store is None:
         write_hf_exports(store, state, videos_by_id)
+    return video_id
+
+
+def undo_saved_decision(
+    store: HfDatasetStore | None,
+    decision_store: FirestoreDecisionStore | None,
+    state: dict[str, Any],
+    videos_by_id: dict[str, dict[str, Any]],
+    item: dict[str, Any],
+) -> str | None:
+    video_id = str(item.get("video_id") or "")
+    if not video_id:
+        return None
+
+    previous_decision = state.setdefault("decisions", {}).pop(video_id, None)
+    state["current_video_id"] = video_id
+    state["updated_at"] = now_iso()
+    st.session_state["hf_current_video_id"] = video_id
+    skipped_ids = st.session_state.get("funnel_skipped_video_ids")
+    if isinstance(skipped_ids, list) and video_id in skipped_ids:
+        st.session_state["funnel_skipped_video_ids"] = [
+            skipped_id for skipped_id in skipped_ids if skipped_id != video_id
+        ]
+    st.session_state["funnel_last_undo"] = {
+        "video_id": video_id,
+        "category": item.get("category") or (previous_decision or {}).get("category"),
+        "category_label": item.get("category_label") or category_label((previous_decision or {}).get("category")),
+        "classified_at": item.get("classified_at") or (previous_decision or {}).get("classified_at"),
+    }
+
+    if decision_store is not None:
+        decision_store.delete_funnel_decision(
+            dataset_id=state.get("dataset_id") or DATASET_ID,
+            video_id=video_id,
+        )
+    elif store is not None:
+        write_hf_exports(store, state, videos_by_id)
+    else:
+        save_state(state)
+        write_exports(state, videos_by_id)
     return video_id
 
 
@@ -1011,6 +1096,16 @@ def main() -> None:
 
     with action_col:
         st.subheader("Класифікація")
+        active_annotator_id = current_annotator_id()
+        recent_decisions = recent_annotator_decisions(
+            state,
+            videos_by_id,
+            annotator_id=active_annotator_id,
+            limit=HISTORY_LIMIT,
+        )
+        last_undo = st.session_state.get("funnel_last_undo")
+        if isinstance(last_undo, dict) and last_undo.get("video_id") == video.get("video_id"):
+            st.info(f"Повернено відео. Старий клас: {last_undo.get('category_label') or last_undo.get('category') or '-'}")
         for category in [category for category in CATEGORIES if category["id"] != "problem"]:
             button_col, help_col = st.columns([0.82, 2.05], gap="medium")
             with button_col:
@@ -1051,11 +1146,21 @@ def main() -> None:
         if st.button("Наступне відео", use_container_width=True, key="funnel_skip_video"):
             skip_current_video(decision_store, state, video)
             st.rerun()
-        if st.button("Назад", use_container_width=True, disabled=not state.get("recent_history"), key="funnel_bottom_back"):
-            if hf_store is not None:
-                undo_hf_last(hf_store, decision_store, state, videos_by_id)
-            else:
-                undo_last(state, videos_by_id)
+        latest_decision = recent_decisions[0] if recent_decisions else None
+        if latest_decision:
+            st.caption(
+                "Останнє збережене: "
+                f"{latest_decision['video_id']} — {latest_decision['category_label']} "
+                f"({latest_decision.get('classified_at') or '-'})"
+            )
+            with st.expander("Останні 5 моїх рішень", expanded=False):
+                for index, item in enumerate(recent_decisions, start=1):
+                    st.caption(
+                        f"{index}. {item['video_id']} — {item['category_label']} — "
+                        f"{item.get('classified_at') or '-'}"
+                    )
+        if st.button("Назад", use_container_width=True, disabled=not latest_decision, key="funnel_bottom_back"):
+            undo_saved_decision(hf_store, decision_store, state, videos_by_id, latest_decision or {})
             st.rerun()
 
     updated_at = state.get("updated_at")
