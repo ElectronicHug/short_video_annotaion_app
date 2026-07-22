@@ -13,12 +13,14 @@ from annotation_app.common.hf_dataset_store import DATASET_ID, HfDatasetStore
 
 
 CATEGORIES = [
+    ("no_usable_speech", "Без корисного мовлення"),
+    ("speech_no_text", "Мовлення без тексту"),
+    ("text_without_subtitles", "Текст без субтитрів"),
+    ("insufficient_subtitle_alignment", "Недостатній збіг субтитрів"),
+    ("partially_matched", "Субтитри частково збігаються"),
+    ("title_matched", "Субтитри + додатковий текст"),
     ("matched", "Субтитри збігаються"),
-    ("title_matched", "Статичний текст + субтитри"),
-    ("partially_matched", "Частково збігається"),
-    ("unmatched", "Не збігається"),
-    ("annotation_problem", "Проблема з розміткою"),
-    ("ignore", "Ігнорувати"),
+    ("problem", "Проблема"),
 ]
 CATEGORY_LABELS = dict(CATEGORIES)
 TEXT_STATUSES = ["accepted", "empty", "problem", "skipped"]

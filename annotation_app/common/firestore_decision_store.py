@@ -256,6 +256,9 @@ class FirestoreDecisionStore:
         )
         self.claims_collection.document(self.document_id(dataset_id, video_id)).delete()
 
+    def release_funnel_claim(self, *, dataset_id: str, video_id: str) -> None:
+        self.claims_collection.document(self.document_id(dataset_id, video_id)).delete()
+
     def load_text_frame_annotations(self, dataset_id: str) -> dict[str, dict[str, Any]]:
         query = (
             self.text_collection.where("dataset_id", "==", dataset_id)

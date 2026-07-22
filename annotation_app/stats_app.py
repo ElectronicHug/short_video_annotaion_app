@@ -12,12 +12,19 @@ from annotation_app.common.hf_dataset_store import DATASET_ID
 
 
 FUNNEL_CATEGORY_LABELS = {
+    "no_usable_speech": "Без корисного мовлення",
+    "speech_no_text": "Мовлення без тексту",
+    "text_without_subtitles": "Текст без субтитрів",
+    "insufficient_subtitle_alignment": "Недостатній збіг субтитрів",
+    "partially_matched": "Субтитри частково збігаються",
+    "title_matched": "Субтитри + додатковий текст",
     "matched": "Субтитри збігаються",
-    "title_matched": "Статичний текст + субтитри",
-    "partly_matched": "Частково збігаються",
-    "unmatched": "Не збігаються",
-    "ignore": "Немає тексту",
-    "annotation_problem": "Проблема розмітки",
+    "problem": "Проблема",
+    # legacy labels for historical Firestore records
+    "unmatched": "Legacy: Не збігається",
+    "ignore": "Legacy: Ігнорувати",
+    "annotation_problem": "Legacy: Проблема розмітки",
+    "partly_matched": "Legacy: Частково збігаються",
 }
 
 

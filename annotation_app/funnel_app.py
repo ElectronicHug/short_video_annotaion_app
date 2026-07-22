@@ -40,34 +40,44 @@ DEFAULT_CLAIM_TTL_MINUTES = 30
 
 CATEGORIES = [
     {
-        "id": "matched",
-        "label": "Субтитри збігаються",
-        "help": "На відео лише субтитри, які співпадають з тим, що говориться.",
+        "id": "no_usable_speech",
+        "label": "Без корисного мовлення",
+        "help": "Немає мовлення, придатного для transcript dataset: тиша, музика, спів, шум, фонова мова або дуже короткі вигуки.",
     },
     {
-        "id": "title_matched",
-        "label": "Статичний текст + субтитри",
-        "help": "Є статичний текст, який не говориться, плюс субтитри співпадають з мовленням.",
+        "id": "speech_no_text",
+        "label": "Мовлення без тексту",
+        "help": "Є корисне мовлення, але на екрані немає видимого тексту для OCR/subtitle порівняння.",
+    },
+    {
+        "id": "text_without_subtitles",
+        "label": "Текст без субтитрів",
+        "help": "Є корисне мовлення і видимий текст, але це не субтитри до мовлення: заголовок, банер, список, текстова картка, UI тощо.",
+    },
+    {
+        "id": "insufficient_subtitle_alignment",
+        "label": "Недостатній збіг субтитрів",
+        "help": "Є subtitle-like текст, але він покриває замало мовлення або помітно відрізняється, тому як pseudo label йому не довіряємо.",
     },
     {
         "id": "partially_matched",
-        "label": "Частково збігається",
-        "help": "Частково збігаються: приблизно 80% або більше.",
+        "label": "Субтитри частково збігаються",
+        "help": "Субтитри загалом правильні, але покривають не все корисне мовлення: приблизно 80–95%.",
     },
     {
-        "id": "unmatched",
-        "label": "Не збігається",
-        "help": "Є текст, який не збігається взагалі або збігається менше ніж на 80%.",
+        "id": "title_matched",
+        "label": "Субтитри + додатковий текст",
+        "help": "Субтитри майже повністю збігаються з мовленням, але є значущий додатковий текст, який треба відділяти.",
     },
     {
-        "id": "annotation_problem",
-        "label": "Проблема з розміткою",
-        "help": "Технічна проблема або неможливо надійно розмітити.",
+        "id": "matched",
+        "label": "Субтитри збігаються",
+        "help": "Видимі субтитри майже повністю і буквально відповідають корисному мовленню; додаткового значущого тексту немає.",
     },
     {
-        "id": "ignore",
-        "label": "Ігнорувати",
-        "help": "Немає субтитрів і статичного тексту.",
+        "id": "problem",
+        "label": "Проблема",
+        "help": "Технічна проблема: відео не відкривається, погана якість, неможливо надійно розмітити через збій або іншу технічну причину.",
     },
 ]
 CATEGORY_BY_ID = {category["id"]: category for category in CATEGORIES}
@@ -446,13 +456,19 @@ def select_next_video(
     randomize: bool,
     enrich: bool = True,
     locked_ids: set[str] | None = None,
+    skipped_ids: set[str] | None = None,
 ) -> dict[str, Any] | None:
     decided_ids = set(state.get("decisions", {}).keys())
     locked_ids = locked_ids or set()
+    skipped_ids = skipped_ids or set()
     candidates = [
         video
         for video in videos
-        if video["video_id"] not in decided_ids and video["video_id"] not in locked_ids
+        if (
+            video["video_id"] not in decided_ids
+            and video["video_id"] not in locked_ids
+            and video["video_id"] not in skipped_ids
+        )
     ]
     if not candidates:
         return None
@@ -483,13 +499,19 @@ def select_prefetch_videos(
     *,
     limit: int,
     locked_ids: set[str] | None = None,
+    skipped_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     decided_ids = set(state.get("decisions", {}).keys())
     locked_ids = locked_ids or set()
+    skipped_ids = skipped_ids or set()
     candidates = [
         video
         for video in videos
-        if video["video_id"] not in decided_ids and video["video_id"] not in locked_ids
+        if (
+            video["video_id"] not in decided_ids
+            and video["video_id"] not in locked_ids
+            and video["video_id"] not in skipped_ids
+        )
     ]
     if not candidates:
         return []
@@ -584,6 +606,26 @@ def classify_hf_video(
         )
     else:
         write_hf_exports(store, state, videos_by_id)
+
+
+def skip_current_video(
+    decision_store: FirestoreDecisionStore | None,
+    state: dict[str, Any],
+    video: dict[str, Any],
+) -> None:
+    video_id = video["video_id"]
+    skipped_ids = st.session_state.setdefault("funnel_skipped_video_ids", [])
+    if video_id not in skipped_ids:
+        skipped_ids.append(video_id)
+    state["current_video_id"] = None
+    st.session_state.pop("hf_current_video_id", None)
+    if decision_store is not None:
+        decision_store.release_funnel_claim(
+            dataset_id=state.get("dataset_id") or DATASET_ID,
+            video_id=video_id,
+        )
+    else:
+        save_state(state)
 
 
 def undo_last(state: dict[str, Any], videos_by_id: dict[str, dict[str, Any]]) -> str | None:
@@ -858,12 +900,14 @@ def main() -> None:
     with top_right:
         st.caption("Уже розмічені відео автоматично пропускаються.")
 
+    skipped_video_ids = set(st.session_state.get("funnel_skipped_video_ids", []))
     video = select_next_video(
         videos,
         state,
         randomize=randomize,
         enrich=hf_store is None,
         locked_ids=claim_locked_ids,
+        skipped_ids=skipped_video_ids,
     )
     if video is None:
         st.success("Усі доступні короткі відео вже розмічені або тимчасово заблоковані.")
@@ -926,11 +970,11 @@ def main() -> None:
                 decision_store,
                 state,
                 video,
-                "annotation_problem",
+                "problem",
                 videos_by_id,
                 {
-                    "annotation_problem_reason": "hf_download_timeout",
-                    "annotation_problem_seconds": HF_DOWNLOAD_TIMEOUT_SECONDS,
+                    "problem_reason": "hf_download_timeout",
+                    "problem_seconds": HF_DOWNLOAD_TIMEOUT_SECONDS,
                 },
             )
             st.warning("Відео завантажувалось занадто довго. Позначено як проблему з розміткою.")
@@ -947,11 +991,11 @@ def main() -> None:
                 decision_store,
                 state,
                 video,
-                "annotation_problem",
+                "problem",
                 videos_by_id,
                 {
-                    "annotation_problem_reason": "hf_download_error",
-                    "annotation_problem_error_type": type(exc).__name__,
+                    "problem_reason": "hf_download_error",
+                    "problem_error_type": type(exc).__name__,
                 },
             )
             st.warning("Не вдалося завантажити відео. Позначено як проблему з розміткою.")
@@ -964,6 +1008,7 @@ def main() -> None:
                 video["video_id"],
                 limit=HF_PREFETCH_AHEAD,
                 locked_ids=claim_locked_ids,
+                skipped_ids=skipped_video_ids,
             )
             if item["video_id"] not in futures and not hf_store.is_video_cached(item)
         ]
@@ -1012,10 +1057,10 @@ def main() -> None:
 
     with action_col:
         st.subheader("Класифікація")
-        for category in CATEGORIES:
+        for category in [category for category in CATEGORIES if category["id"] != "problem"]:
             button_col, help_col = st.columns([0.9, 1.25], gap="small")
             with button_col:
-                clicked = st.button(category["label"], use_container_width=True)
+                clicked = st.button(category["label"], use_container_width=True, key=f"funnel_category_{category['id']}")
             with help_col:
                 st.markdown(
                     f"<div class='decision-help'>{category['help']}</div>",
@@ -1027,6 +1072,29 @@ def main() -> None:
                 else:
                     classify_video(state, video, category["id"], videos_by_id)
                 st.rerun()
+        st.divider()
+        problem_category = CATEGORY_BY_ID["problem"]
+        problem_col, problem_help_col = st.columns([0.9, 1.25], gap="small")
+        with problem_col:
+            problem_clicked = st.button(
+                problem_category["label"],
+                use_container_width=True,
+                key="funnel_category_problem",
+            )
+        with problem_help_col:
+            st.markdown(
+                f"<div class='decision-help'>{problem_category['help']}</div>",
+                unsafe_allow_html=True,
+            )
+        if problem_clicked:
+            if hf_store is not None:
+                classify_hf_video(hf_store, decision_store, state, video, "problem", videos_by_id)
+            else:
+                classify_video(state, video, "problem", videos_by_id)
+            st.rerun()
+        if st.button("Наступне відео", use_container_width=True, key="funnel_skip_video"):
+            skip_current_video(decision_store, state, video)
+            st.rerun()
 
     updated_at = state.get("updated_at")
     if updated_at:
