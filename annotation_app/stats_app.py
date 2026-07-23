@@ -84,12 +84,15 @@ def funnel_class_distribution(counter: Counter[str], total: int) -> pd.DataFrame
 
 
 def usefulness_funnel(counter: Counter[str], total: int) -> pd.DataFrame:
+    def percent_text(value: int, denominator: int) -> str:
+        return f"{percent(value, denominator)}%" if denominator else "0.0%"
+
     def row(step: str, count: int, previous: int | None, includes: str) -> dict[str, Any]:
         return {
             "Крок": step,
             "Відео": count,
-            "% від розмічених": percent(count, total),
-            "% від попереднього": "—" if previous is None else percent(count, previous),
+            "% від розмічених": percent_text(count, total),
+            "% від попереднього": "—" if previous is None else percent_text(count, previous),
             "Що входить": includes,
         }
 
