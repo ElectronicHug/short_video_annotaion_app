@@ -56,6 +56,10 @@ def display_counter_table(counter: Counter[str], total: int, *, label_column: st
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
 
 
+def display_static_table(table: pd.DataFrame) -> None:
+    st.markdown(table.to_html(index=False, escape=True), unsafe_allow_html=True)
+
+
 def funnel_class_distribution(counter: Counter[str], total: int) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -219,10 +223,10 @@ def main() -> None:
         s4.metric("Проблема", f"{problem_count}", f"{percent(problem_count, funnel_total)}%")
 
         st.markdown("### Розподіл класів")
-        st.dataframe(funnel_class_distribution(category_counter, funnel_total), hide_index=True, use_container_width=True)
+        display_static_table(funnel_class_distribution(category_counter, funnel_total))
 
         st.markdown("### Воронка корисності")
-        st.dataframe(usefulness_funnel(category_counter, funnel_total), hide_index=True, use_container_width=True)
+        display_static_table(usefulness_funnel(category_counter, funnel_total))
         st.caption(
             "Воронка — це routing view для наступних етапів pseudo-label/transcript pipeline, "
             "а не видалення відео з датасету."
