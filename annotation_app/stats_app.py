@@ -28,6 +28,18 @@ FUNNEL_CATEGORY_LABELS = {
 }
 
 
+FUNNEL_DISPLAY_ORDER = [
+    "problem",
+    "no_usable_speech",
+    "speech_no_text",
+    "text_without_subtitles",
+    "insufficient_subtitle_alignment",
+    "partially_matched",
+    "title_matched",
+    "matched",
+]
+
+
 def percent(value: int, total: int) -> float:
     return round((value / total) * 100, 1) if total else 0.0
 
@@ -42,6 +54,76 @@ def display_counter_table(counter: Counter[str], total: int, *, label_column: st
         for key, count in counter.most_common()
     ]
     st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+
+
+def funnel_class_distribution(counter: Counter[str], total: int) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for category_id in FUNNEL_DISPLAY_ORDER:
+        count = counter.get(category_id, 0)
+        seen.add(category_id)
+        rows.append(
+            {
+                "Клас": FUNNEL_CATEGORY_LABELS.get(category_id, category_id),
+                "Відео": count,
+                "%": percent(count, total),
+            }
+        )
+
+    for category_id, count in sorted(counter.items()):
+        if category_id in seen:
+            continue
+        rows.append(
+            {
+                "Клас": FUNNEL_CATEGORY_LABELS.get(category_id, category_id),
+                "Відео": count,
+                "%": percent(count, total),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def usefulness_funnel(counter: Counter[str], total: int) -> pd.DataFrame:
+    def row(step: str, count: int, previous: int | None, includes: str) -> dict[str, Any]:
+        return {
+            "Крок": step,
+            "Відео": count,
+            "% від розмічених": percent(count, total),
+            "% від попереднього": "—" if previous is None else percent(count, previous),
+            "Що входить": includes,
+        }
+
+    problem = counter.get("problem", 0)
+    no_usable_speech = counter.get("no_usable_speech", 0)
+    speech_no_text = counter.get("speech_no_text", 0)
+    insufficient = counter.get("insufficient_subtitle_alignment", 0)
+    partially = counter.get("partially_matched", 0)
+    title_matched = counter.get("title_matched", 0)
+    matched = counter.get("matched", 0)
+
+    without_problem = total - problem
+    useful_speech = without_problem - no_usable_speech
+    speech_and_visible_text = useful_speech - speech_no_text
+    subtitle_alignment_chance = insufficient + partially + title_matched + matched
+    useful_candidates = partially + title_matched + matched
+    strong_candidates = title_matched + matched
+
+    return pd.DataFrame(
+        [
+            row("Всього розмічено", total, None, "усі funnel-класи"),
+            row("Без технічних проблем", without_problem, total, "усі крім Проблема"),
+            row("Є корисне мовлення", useful_speech, without_problem, "мінус Без корисного мовлення"),
+            row("Є мовлення і видимий текст", speech_and_visible_text, useful_speech, "мінус Мовлення без тексту"),
+            row(
+                "Є шанс на subtitle alignment",
+                subtitle_alignment_chance,
+                speech_and_visible_text,
+                "Недостатній збіг + Частково + Додатковий текст + Збігаються",
+            ),
+            row("Корисні кандидати", useful_candidates, subtitle_alignment_chance, "Частково + Додатковий текст + Збігаються"),
+            row("Strong candidates", strong_candidates, useful_candidates, "Додатковий текст + Збігаються"),
+        ]
+    )
 
 
 def funnel_by_user(records: list[dict[str, Any]]) -> pd.DataFrame:
@@ -114,10 +196,33 @@ def main() -> None:
     c3.metric("Matched + static", category_counter.get("matched", 0) + category_counter.get("title_matched", 0))
 
     if funnel_total:
-        display_counter_table(
-            Counter(FUNNEL_CATEGORY_LABELS.get(key, key) for key in category_counter.elements()),
-            funnel_total,
-            label_column="category",
+        useful_candidates = (
+            category_counter.get("partially_matched", 0)
+            + category_counter.get("title_matched", 0)
+            + category_counter.get("matched", 0)
+        )
+        strong_candidates = category_counter.get("title_matched", 0) + category_counter.get("matched", 0)
+        low_priority = (
+            category_counter.get("no_usable_speech", 0)
+            + category_counter.get("speech_no_text", 0)
+            + category_counter.get("text_without_subtitles", 0)
+        )
+        problem_count = category_counter.get("problem", 0)
+
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Корисні кандидати", f"{useful_candidates}", f"{percent(useful_candidates, funnel_total)}%")
+        s2.metric("Strong candidates", f"{strong_candidates}", f"{percent(strong_candidates, funnel_total)}%")
+        s3.metric("Drop / low-priority", f"{low_priority}", f"{percent(low_priority, funnel_total)}%")
+        s4.metric("Проблема", f"{problem_count}", f"{percent(problem_count, funnel_total)}%")
+
+        st.markdown("### Розподіл класів")
+        st.dataframe(funnel_class_distribution(category_counter, funnel_total), hide_index=True, use_container_width=True)
+
+        st.markdown("### Воронка корисності")
+        st.dataframe(usefulness_funnel(category_counter, funnel_total), hide_index=True, use_container_width=True)
+        st.caption(
+            "Воронка — це routing view для наступних етапів pseudo-label/transcript pipeline, "
+            "а не видалення відео з датасету."
         )
         st.caption("По користувачах")
         st.dataframe(funnel_by_user(funnel_records), hide_index=True, use_container_width=True)
