@@ -178,6 +178,45 @@ def text_by_user(records: list[dict[str, Any]]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+
+def annotation_summary(
+    funnel_records: list[dict[str, Any]],
+    text_records: list[dict[str, Any]],
+    transcript_records: list[dict[str, Any]],
+) -> pd.DataFrame:
+    def video_ids(records: list[dict[str, Any]]) -> set[str]:
+        return {str(record["video_id"]) for record in records if record.get("video_id")}
+
+    grouped: list[dict[str, list[dict[str, Any]]]] = []
+    for records in (funnel_records, text_records, transcript_records):
+        users: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in records:
+            users[str(record.get("annotator_id") or "unknown")].append(record)
+        grouped.append(users)
+
+    def summary_row(user: str, funnel: list[dict[str, Any]], frames: list[dict[str, Any]], transcripts: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "Анотатор": user,
+            "Класифіковано відео": len(video_ids(funnel)),
+            "Розмічено кадрів (відео)": f"{len(frames):,} ({len(video_ids(frames)):,})".replace(",", " ") if frames else "0",
+            "Фінальні транскрипти": len(video_ids(transcripts)),
+        }
+
+    users = set().union(*(set(group) for group in grouped))
+    # Keep the contribution score internal; only annotation counts are displayed.
+    def contribution_score(user: str) -> int:
+        return (
+            len(video_ids(grouped[0].get(user, [])))
+            + len(grouped[1].get(user, []))
+            + 5 * len(video_ids(grouped[2].get(user, [])))
+        )
+
+    ordered_users = sorted(users, key=lambda user: (-contribution_score(user), user))
+    rows = [summary_row(user, *(group.get(user, []) for group in grouped)) for user in ordered_users]
+    rows.append(summary_row("Разом", funnel_records, text_records, transcript_records))
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     active_user = require_login(form_key="stats_login_form")
     if active_user is None:
@@ -193,64 +232,82 @@ def main() -> None:
 
     funnel_records = store.load_funnel_decision_records(DATASET_ID)
     text_records = store.load_text_frame_annotation_records(DATASET_ID)
+    transcript_records = store.load_video_transcript_annotation_records(DATASET_ID)
 
-    st.subheader("Класифікація відео")
-    funnel_total = len(funnel_records)
-    category_counter = Counter(str(record.get("category") or "unknown") for record in funnel_records)
+    summary = annotation_summary(funnel_records, text_records, transcript_records)
+    totals = summary.iloc[-1]
     c1, c2, c3 = st.columns(3)
-    c1.metric("Усього рішень", funnel_total)
-    c2.metric("Анотатори", len({record.get("annotator_id") for record in funnel_records}))
-    c3.metric("Matched + static", category_counter.get("matched", 0) + category_counter.get("title_matched", 0))
+    c1.metric("Класифіковано відео", int(totals["Класифіковано відео"]))
+    c2.metric("Відео з розміткою кадрів", len({record["video_id"] for record in text_records if record.get("video_id")}))
+    c3.metric("Відео з фінальним транскриптом", int(totals["Фінальні транскрипти"]))
 
-    if funnel_total:
-        useful_candidates = (
-            category_counter.get("partially_matched", 0)
-            + category_counter.get("title_matched", 0)
-            + category_counter.get("matched", 0)
-        )
-        strong_candidates = category_counter.get("title_matched", 0) + category_counter.get("matched", 0)
-        low_priority = (
-            category_counter.get("no_usable_speech", 0)
-            + category_counter.get("speech_no_text", 0)
-            + category_counter.get("text_without_subtitles", 0)
-        )
-        problem_count = category_counter.get("problem", 0)
+    st.subheader("Зведена таблиця по анотаторах")
+    display_static_table(summary)
+    st.caption(
+        "Кадри: кількість збережених кадрів, у дужках — кількість відео з хоча б одним розміченим кадром. "
+        "Це не обов’язково повністю розмічені відео. У рядку «Разом» відео рахуються без повторів. "
+        "Таблиця враховує всі збережені статуси й поточне авторство анотацій, а не кількість редагувань."
+    )
 
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Корисні кандидати", f"{useful_candidates}", f"{percent(useful_candidates, funnel_total)}%")
-        s2.metric("Strong candidates", f"{strong_candidates}", f"{percent(strong_candidates, funnel_total)}%")
-        s3.metric("Drop / low-priority", f"{low_priority}", f"{percent(low_priority, funnel_total)}%")
-        s4.metric("Проблема", f"{problem_count}", f"{percent(problem_count, funnel_total)}%")
 
-        st.markdown("### Розподіл класів")
-        display_static_table(funnel_class_distribution(category_counter, funnel_total))
+    with st.expander("Детальна статистика класів і кадрів"):
+        st.subheader("Класифікація відео")
+        funnel_total = len(funnel_records)
+        category_counter = Counter(str(record.get("category") or "unknown") for record in funnel_records)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Усього рішень", funnel_total)
+        c2.metric("Анотатори", len({record.get("annotator_id") for record in funnel_records}))
+        c3.metric("Matched + static", category_counter.get("matched", 0) + category_counter.get("title_matched", 0))
 
-        st.markdown("### Воронка корисності")
-        display_static_table(usefulness_funnel(category_counter, funnel_total))
-        st.caption(
-            "Воронка — це routing view для наступних етапів pseudo-label/transcript pipeline, "
-            "а не видалення відео з датасету."
-        )
-        st.caption("По користувачах")
-        st.dataframe(funnel_by_user(funnel_records), hide_index=True, use_container_width=True)
-    else:
-        st.info("У Firestore ще немає funnel-рішень.")
+        if funnel_total:
+            useful_candidates = (
+                category_counter.get("partially_matched", 0)
+                + category_counter.get("title_matched", 0)
+                + category_counter.get("matched", 0)
+            )
+            strong_candidates = category_counter.get("title_matched", 0) + category_counter.get("matched", 0)
+            low_priority = (
+                category_counter.get("no_usable_speech", 0)
+                + category_counter.get("speech_no_text", 0)
+                + category_counter.get("text_without_subtitles", 0)
+            )
+            problem_count = category_counter.get("problem", 0)
 
-    st.subheader("Виправлення тексту")
-    text_total = len(text_records)
-    status_counter = Counter(str(record.get("status") or "unknown") for record in text_records)
-    unique_text_videos = {record.get("video_id") for record in text_records if record.get("video_id")}
-    t1, t2, t3 = st.columns(3)
-    t1.metric("Розмічені кадри", text_total)
-    t2.metric("Відео з розміткою", len(unique_text_videos))
-    t3.metric("Анотатори", len({record.get("annotator_id") for record in text_records}))
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("Корисні кандидати", f"{useful_candidates}", f"{percent(useful_candidates, funnel_total)}%")
+            s2.metric("Strong candidates", f"{strong_candidates}", f"{percent(strong_candidates, funnel_total)}%")
+            s3.metric("Drop / low-priority", f"{low_priority}", f"{percent(low_priority, funnel_total)}%")
+            s4.metric("Проблема", f"{problem_count}", f"{percent(problem_count, funnel_total)}%")
 
-    if text_total:
-        display_counter_table(status_counter, text_total, label_column="status")
-        st.caption("По користувачах")
-        st.dataframe(text_by_user(text_records), hide_index=True, use_container_width=True)
-    else:
-        st.info("У Firestore ще немає виправлень тексту.")
+            st.markdown("### Розподіл класів")
+            display_static_table(funnel_class_distribution(category_counter, funnel_total))
+
+            st.markdown("### Воронка корисності")
+            display_static_table(usefulness_funnel(category_counter, funnel_total))
+            st.caption(
+                "Воронка — це routing view для наступних етапів pseudo-label/transcript pipeline, "
+                "а не видалення відео з датасету."
+            )
+            st.caption("По користувачах")
+            st.dataframe(funnel_by_user(funnel_records), hide_index=True, use_container_width=True)
+        else:
+            st.info("У Firestore ще немає funnel-рішень.")
+
+        st.subheader("Виправлення тексту")
+        text_total = len(text_records)
+        status_counter = Counter(str(record.get("status") or "unknown") for record in text_records)
+        unique_text_videos = {record.get("video_id") for record in text_records if record.get("video_id")}
+        t1, t2, t3 = st.columns(3)
+        t1.metric("Розмічені кадри", text_total)
+        t2.metric("Відео з розміткою", len(unique_text_videos))
+        t3.metric("Анотатори", len({record.get("annotator_id") for record in text_records}))
+
+        if text_total:
+            display_counter_table(status_counter, text_total, label_column="status")
+            st.caption("По користувачах")
+            st.dataframe(text_by_user(text_records), hide_index=True, use_container_width=True)
+        else:
+            st.info("У Firestore ще немає виправлень тексту.")
 
 
 if __name__ == "__main__":
